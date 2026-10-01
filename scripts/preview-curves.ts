@@ -1,5 +1,6 @@
 import { MigrationOption } from "@meteora-ag/dynamic-bonding-curve-sdk";
-import { freePresetAccess } from "../lib/marketplace/access";
+import { decidePresetAccess } from "../lib/marketplace/access";
+import { graduationBlockReason } from "../lib/meteora/actions";
 import { KEEPER_MIN_QUOTE, type QuoteKind } from "../lib/meteora/constants";
 import { previewPreset } from "../lib/meteora/curve";
 import { LAUNCH_PRESETS } from "../lib/meteora/presets";
@@ -8,14 +9,21 @@ const quotes: QuoteKind[] = ["SOL", "USDC"];
 let failed = 0;
 
 for (const preset of LAUNCH_PRESETS) {
-  const access = freePresetAccess.check(preset);
+  const access = decidePresetAccess(preset, false);
   if (preset.access === "free" && !access.allowed) {
     console.error(`free preset blocked: ${preset.id}`);
     failed += 1;
   }
   if (preset.access === "paid" && access.allowed) {
-    console.error(`paid preset was unlocked without a payment provider: ${preset.id}`);
+    console.error(`paid preset was unlocked without the demo flag: ${preset.id}`);
     failed += 1;
+  }
+  if (preset.access === "paid") {
+    const demo = decidePresetAccess(preset, true);
+    if (!demo.allowed || !demo.demoUnlock || !/no sol was collected/i.test(demo.reason)) {
+      console.error(`demo unlock did not stay honest for ${preset.id}`);
+      failed += 1;
+    }
   }
 
   for (const quote of quotes) {
@@ -51,6 +59,29 @@ for (const preset of LAUNCH_PRESETS) {
       }
     }
   }
+}
+
+const below = graduationBlockReason({
+  quoteReserve: "1",
+  migrationThreshold: "100",
+  migrated: false,
+  dammExists: false,
+});
+const ready = graduationBlockReason({
+  quoteReserve: "100",
+  migrationThreshold: "100",
+  migrated: false,
+  dammExists: false,
+});
+const graduated = graduationBlockReason({
+  quoteReserve: "100",
+  migrationThreshold: "100",
+  migrated: true,
+  dammExists: false,
+});
+if (!below || ready || !graduated) {
+  console.error("graduation gate did not block incomplete or already migrated pools");
+  failed += 1;
 }
 
 if (failed > 0) {

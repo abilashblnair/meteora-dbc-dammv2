@@ -31,8 +31,8 @@ export function LaunchBook() {
       <div className="card-grid">
         {visible.length === 0 && (
           <article className="card">
-            <h3>No local launches on {network}</h3>
-            <p>Confirmed launches from this browser are stored locally so you can return to them. They are not an index of the chain.</p>
+            <h3>No confirmed launches on {network} yet</h3>
+            <p>Create one from Launch. After both signatures confirm, the pool address shows up here. This list is only this browser. It is not a chain index, and an unconfirmed attempt is not saved.</p>
           </article>
         )}
         {visible.map((row) => (

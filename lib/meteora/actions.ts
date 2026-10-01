@@ -222,26 +222,70 @@ export async function buildDbcSwapTransaction(input: {
   });
 }
 
+export function graduationBlockReason(input: {
+  quoteReserve: string;
+  migrationThreshold: string;
+  migrated: boolean;
+  dammExists: boolean;
+}): string | null {
+  let reserve: BN;
+  let threshold: BN;
+  try {
+    reserve = new BN(input.quoteReserve);
+    threshold = new BN(input.migrationThreshold);
+  } catch {
+    return "Quote reserve could not be read. Refresh the desk before graduating.";
+  }
+  if (threshold.lten(0)) {
+    return "The migration threshold is zero, so StockCurve will not build a graduation transaction.";
+  }
+  if (input.migrated || input.dammExists) {
+    return "This pool has already graduated. Trade the DAMM v2 pool. A second migration is not submitted.";
+  }
+  if (reserve.lt(threshold)) {
+    return "Graduation stays unsigned until the quote reserve reaches the migration threshold. Buy more quote on this DBC pool, then refresh. A sandbox devnet listing finishes at a small amount. Mainnet keepers migrate eligible pools at 10 SOL or 750 USDC.";
+  }
+  return null;
+}
+
 export async function buildGraduationTransaction(input: {
   connection: Connection;
   payer: PublicKey;
   poolAddress: string;
 }): Promise<BuiltTransaction & { dammPool: PublicKey }> {
   const snapshot = await loadPoolSnapshot(input.connection, input.poolAddress);
-  if (!snapshot) throw new Error("DBC pool not found on this network.");
-  if (snapshot.migrated) throw new Error("This pool is already marked migrated.");
-  if (!snapshot.complete) {
+  if (!snapshot) throw new Error("DBC pool not found on this network. Check the header network and the pool address.");
+  const damm = await loadDammSnapshot(input.connection, snapshot.dammPool);
+  const blocked = graduationBlockReason({
+    quoteReserve: snapshot.quoteReserve,
+    migrationThreshold: snapshot.migrationThreshold,
+    migrated: snapshot.migrated,
+    dammExists: damm.exists,
+  });
+  if (blocked) throw new Error(blocked);
+
+  const client = dbcClient(input.connection);
+  const pool = await client.state.getPool(input.poolAddress);
+  const config = pool ? await client.state.getPoolConfig(pool.poolState.config) : null;
+  if (!pool || !config) throw new Error("The pool disappeared before graduation was built. Refresh and read it again.");
+  if (pool.poolState.isMigrated === 1) {
+    throw new Error("This pool has already graduated. Trade the DAMM v2 pool. A second migration is not submitted.");
+  }
+  if (pool.poolState.quoteReserve.lt(config.migrationQuoteThreshold)) {
     throw new Error(
-      "The bonding curve has not reached its migration quote threshold, so StockCurve will not submit a graduation transaction.",
+      "The curve moved under the threshold while graduation was prepared. Refresh the desk and fill the book before signing.",
     );
   }
-  const client = dbcClient(input.connection);
+
   const dammConfig = dammMigrationConfig();
   const response = await client.migration.migrateToDammV2({
     payer: input.payer,
     pool: new PublicKey(input.poolAddress),
     dammConfig,
   });
+  if (!response.transaction || !response.firstPositionNftKeypair || !response.secondPositionNftKeypair) {
+    throw new Error("The DBC SDK did not return a graduation transaction and both position NFT keypairs. Nothing was submitted.");
+  }
   return {
     transaction: response.transaction,
     signers: [response.firstPositionNftKeypair, response.secondPositionNftKeypair],

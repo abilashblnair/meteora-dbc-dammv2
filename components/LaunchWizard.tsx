@@ -1,14 +1,16 @@
 "use client";
 
 import { CurveChart, priceLabel } from "@/components/CurveChart";
+import { DemoUnlock, useDemoUnlock } from "@/components/DemoUnlock";
+import { Lifecycle } from "@/components/Lifecycle";
 import { useNetwork } from "@/components/Providers";
 import { explainError } from "@/lib/errors";
 import { explorerTx } from "@/lib/format";
-import { freePresetAccess } from "@/lib/marketplace/access";
+import { decidePresetAccess } from "@/lib/marketplace/access";
 import { buildConfigTransaction, buildPoolTransaction } from "@/lib/meteora/actions";
 import { KEEPER_MIN_QUOTE, quoteMintFor, type NetworkProfile, type QuoteKind } from "@/lib/meteora/constants";
 import { previewPreset } from "@/lib/meteora/curve";
-import { LAUNCH_PRESETS, getPreset, type LaunchPreset } from "@/lib/meteora/presets";
+import { LAUNCH_PRESETS, SHAPE_GUIDE, getPreset, type LaunchPreset } from "@/lib/meteora/presets";
 import { writeLaunch } from "@/lib/storage";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Keypair, type Transaction } from "@solana/web3.js";
@@ -33,9 +35,13 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [poolAddress, setPoolAddress] = useState("");
+  const [configSignature, setConfigSignature] = useState("");
+  const [poolSignature, setPoolSignature] = useState("");
+  const [phase, setPhase] = useState<"idle" | "config" | "pool" | "live">("idle");
+  const unlock = useDemoUnlock();
 
   const preset = getPreset(presetId) ?? LAUNCH_PRESETS[0];
-  const access = freePresetAccess.check(preset);
+  const access = decidePresetAccess(preset, unlock.enabled);
   const preview = useMemo(() => {
     try {
       return { value: previewPreset(preset, quote, profile), error: "" };
@@ -90,8 +96,10 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
       return;
     }
     setBusy(true);
+    let confirmedConfigSig = "";
     try {
-      setStatus("Building the DBC config transaction…");
+      setPhase("config");
+      setStatus("Building the DBC config with partner.createConfig. Approve the first signature in your wallet.");
       const configBuilt = await buildConfigTransaction({
         connection,
         payer: publicKey,
@@ -101,8 +109,11 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
         network,
       });
       setStatus("Waiting for the config signature. The config keypair signs with your wallet.");
-      const configSignature = await signAndSend(configBuilt.transaction, configBuilt.signers);
-      setStatus(`Config confirmed: ${configSignature}. Building the pool transaction…`);
+      const confirmedConfig = await signAndSend(configBuilt.transaction, configBuilt.signers);
+      confirmedConfigSig = confirmedConfig;
+      setConfigSignature(confirmedConfig);
+      setPhase("pool");
+      setStatus("Config signature confirmed. Building the pool with creator.createPool. Approve the second signature.");
       const quoteMint = quoteMintFor(network, quote);
       const poolBuilt = await buildPoolTransaction({
         connection,
@@ -114,7 +125,9 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
         uri: uri.trim(),
       });
       setStatus("Waiting for the pool signature. The new mint keypair signs with your wallet.");
-      const poolSignature = await signAndSend(poolBuilt.transaction, poolBuilt.signers);
+      const confirmedPool = await signAndSend(poolBuilt.transaction, poolBuilt.signers);
+      setPoolSignature(confirmedPool);
+      setPhase("live");
       writeLaunch({
         network,
         name: name.trim(),
@@ -128,15 +141,16 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
         baseMint: poolBuilt.baseMint.toBase58(),
         quoteMint: quoteMint.toBase58(),
         creator: publicKey.toBase58(),
-        configSignature,
-        poolSignature,
+        configSignature: confirmedConfig,
+        poolSignature: confirmedPool,
         createdAt: Date.now(),
       });
       setPoolAddress(poolBuilt.pool.toBase58());
-      setStatus(`Pool confirmed: ${poolSignature}`);
+      setStatus("Pool signature confirmed. The listing is live on the DBC curve. Graduation and DAMM v2 trading happen on the pool desk after the quote reserve fills.");
     } catch (cause) {
       setError(explainError(cause));
       setStatus("");
+      if (!confirmedConfigSig) setPhase("idle");
     } finally {
       setBusy(false);
     }
@@ -152,13 +166,43 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
         ))}
       </div>
       <div className="paper">
+        <DemoUnlock enabled={unlock.enabled} forced={unlock.forced} onChange={unlock.setEnabled} />
+        <Lifecycle
+          stages={[
+            {
+              label: "Config",
+              state: configSignature ? "done" : phase === "config" ? "current" : "wait",
+              detail: configSignature ? "Signature confirmed" : "partner.createConfig",
+            },
+            {
+              label: "Pool live",
+              state: poolSignature ? "done" : phase === "pool" ? "current" : "wait",
+              detail: poolSignature ? "Signature confirmed" : "creator.createPool",
+            },
+            {
+              label: "Reserve",
+              state: poolSignature ? "current" : "wait",
+              detail: "Fills on the pool desk",
+            },
+            {
+              label: "Graduated",
+              state: "wait",
+              detail: "migrateToDammV2",
+            },
+            {
+              label: "DAMM v2",
+              state: "wait",
+              detail: "CpAmm swap2",
+            },
+          ]}
+        />
         {step === 0 && (
           <>
             <h2>Choose a book</h2>
-            <p>Each preset is compiled with the Meteora curve builders and migrates to DAMM v2.</p>
+            <p>Flat holds a reference price. Long gives the name a runway. Exponential is an opening print with a fee that starts wide because the book is thin.</p>
             <div className="preset-pick">
               {LAUNCH_PRESETS.map((item) => (
-                <PresetChoice key={item.id} preset={item} active={item.id === preset.id} onSelect={() => setPresetId(item.id)} />
+                <PresetChoice key={item.id} preset={item} active={item.id === preset.id} unlockEnabled={unlock.enabled} onSelect={() => setPresetId(item.id)} />
               ))}
             </div>
           </>
@@ -221,6 +265,12 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
             </table>
             {keeperGap && <p className="status">{keeperGap}</p>}
             {!access.allowed && <p className="status error">{access.reason}</p>}
+            {access.demoUnlock && <p className="status">{access.reason}</p>}
+            {!connected && (
+              <p className="status">
+                Connect Phantom or Solflare on {network} before signing. Devnet SOL comes from https://faucet.solana.com. Leave a little extra for fees.
+              </p>
+            )}
           </>
         )}
         {step === 2 && preview.error && <p className="status error">{preview.error}</p>}
@@ -248,12 +298,15 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
             <Link className="button" href={`/pool/${poolAddress}`}>Open pool desk</Link>
           </p>
         )}
-        {status.includes("confirmed") && status.includes("Pool") && (
+        {(configSignature || poolSignature) && (
           <p className="fine">
-            Config and pool signatures are on-chain.{" "}
-            {status.split("Pool confirmed: ")[1] && (
-              <a href={explorerTx(status.split("Pool confirmed: ")[1], network)}>View the pool transaction</a>
+            {configSignature && (
+              <>
+                <a href={explorerTx(configSignature, network)}>Config transaction</a>
+                {" · "}
+              </>
             )}
+            {poolSignature && <a href={explorerTx(poolSignature, network)}>Pool transaction</a>}
           </p>
         )}
       </div>
@@ -264,18 +317,21 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
 function PresetChoice({
   preset,
   active,
+  unlockEnabled,
   onSelect,
 }: {
   preset: LaunchPreset;
   active: boolean;
+  unlockEnabled: boolean;
   onSelect: () => void;
 }) {
-  const access = freePresetAccess.check(preset);
+  const access = decidePresetAccess(preset, unlockEnabled);
+  const shape = SHAPE_GUIDE[preset.shape];
   return (
-    <button className={active ? "active" : ""} type="button" onClick={onSelect} disabled={!access.allowed}>
+    <button className={active ? "active" : ""} type="button" onClick={onSelect} disabled={!access.allowed} title={shape.why}>
       <strong>{preset.name}</strong>
-      <div className="fine">{preset.shape} · {preset.feeLabel}</div>
-      <div className="fine">{access.allowed ? preset.suitedFor : "Listed preset. Payment provider required."}</div>
+      <div className="fine">{shape.title}. {shape.hint}</div>
+      <div className="fine">{access.demoUnlock ? "Demo unlock. No payment collected." : access.allowed ? preset.suitedFor : "Listed preset. Payment provider required."}</div>
     </button>
   );
 }

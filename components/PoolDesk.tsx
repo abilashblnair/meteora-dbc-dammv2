@@ -1,5 +1,6 @@
 "use client";
 
+import { Lifecycle } from "@/components/Lifecycle";
 import { useNetwork } from "@/components/Providers";
 import { explainError } from "@/lib/errors";
 import { explorerAccount, explorerTx, formatRaw, percent, shortKey } from "@/lib/format";
@@ -7,6 +8,7 @@ import {
   buildDammSwapTransaction,
   buildDbcSwapTransaction,
   buildGraduationTransaction,
+  graduationBlockReason,
   loadDammSnapshot,
   loadPoolSnapshot,
   quoteDammSwap,
@@ -74,6 +76,10 @@ export function PoolDesk({ address }: { address: string }) {
   async function onQuote() {
     if (!snapshot) return;
     setError("");
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+      setError("Enter an amount greater than zero. Buys spend the quote token. Sells spend the base token.");
+      return;
+    }
     try {
       const decimals = side === "buy" ? snapshot.quoteDecimals : snapshot.baseDecimals;
       const quoted = await quoteDbcSwap({
@@ -97,7 +103,11 @@ export function PoolDesk({ address }: { address: string }) {
 
   async function onSwap() {
     if (!snapshot || !publicKey) {
-      setError("Connect a wallet before swapping.");
+      setError(`Connect Phantom or Solflare on ${network} before swapping. The quote is free to read. The swap needs a signature.`);
+      return;
+    }
+    if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+      setError("Enter an amount greater than zero.");
       return;
     }
     setBusy(true);
@@ -213,6 +223,15 @@ export function PoolDesk({ address }: { address: string }) {
 
   const quoteDecimals = snapshot?.quoteDecimals ?? 9;
   const progress = snapshot ? Math.max(0, Math.min(1, snapshot.progress)) : 0;
+  const graduationReason = snapshot
+    ? graduationBlockReason({
+        quoteReserve: snapshot.quoteReserve,
+        migrationThreshold: snapshot.migrationThreshold,
+        migrated: snapshot.migrated,
+        dammExists: Boolean(damm?.exists),
+      })
+    : "Read the pool before graduating.";
+  const canGraduate = snapshot ? graduationReason === null && connected && !busy : false;
 
   return (
     <div>
@@ -234,6 +253,12 @@ export function PoolDesk({ address }: { address: string }) {
           )}
         </p>
       )}
+      {loading && !snapshot && !error && (
+        <div className="paper">
+          <h2>Reading the DBC account</h2>
+          <p>StockCurve is asking the RPC for this virtual pool. A missing account stays missing. A confirmed signature is the only success signal later.</p>
+        </div>
+      )}
       {!loading && !snapshot && !error && (
         <div className="paper">
           <h2>No DBC pool on this network</h2>
@@ -243,6 +268,27 @@ export function PoolDesk({ address }: { address: string }) {
       {snapshot && (
         <div className="desk">
           <section className="paper">
+            <Lifecycle
+              stages={[
+                { label: "Config", state: "done", detail: "On this pool" },
+                { label: "Pool live", state: "done", detail: "DBC virtual pool" },
+                {
+                  label: "Reserve",
+                  state: snapshot.complete ? "done" : "current",
+                  detail: percent(progress),
+                },
+                {
+                  label: "Graduated",
+                  state: snapshot.migrated ? "done" : snapshot.complete ? "current" : "wait",
+                  detail: snapshot.migrated ? "Migration flag set" : "migrateToDammV2",
+                },
+                {
+                  label: "DAMM v2",
+                  state: damm?.exists ? "done" : snapshot.migrated ? "current" : "wait",
+                  detail: damm?.exists ? "Pool account found" : "Waiting for the account",
+                },
+              ]}
+            />
             <h2>{snapshot.migrated ? "Graduated" : "On the curve"}</h2>
             <div className="bar" aria-label="Quote progress to graduation">
               <span style={{ width: `${progress * 100}%` }} />
@@ -272,8 +318,8 @@ export function PoolDesk({ address }: { address: string }) {
             </label>
             <div className="actions">
               <button className="button-secondary" type="button" onClick={() => void onQuote()}>Quote</button>
-              <button className="button" type="button" onClick={() => void onSwap()} disabled={busy || snapshot.migrated || !connected}>
-                Sign swap
+              <button className="button" type="button" onClick={() => void onSwap()} disabled={busy || snapshot.migrated || !connected} title={connected ? "Signs swap2" : "Connect a wallet first"}>
+                {connected ? "Sign swap" : "Connect wallet to swap"}
               </button>
             </div>
             {quoteText && <p className="status">{quoteText}</p>}
@@ -284,15 +330,11 @@ export function PoolDesk({ address }: { address: string }) {
             <p className="fine">Derived pool {shortKey(snapshot.dammPool, 6)} from config {shortKey(snapshot.dammConfig, 4)}.</p>
             <p>{damm?.exists ? "The graduated pool account is on this network." : "The graduated pool account is not on this network yet."}</p>
             <div className="actions">
-              <button className="button moss" type="button" disabled={busy || !snapshot.complete || snapshot.migrated || !connected} onClick={() => void onGraduate()}>
-                Graduate to DAMM v2
+              <button className="button moss" type="button" disabled={!canGraduate} onClick={() => void onGraduate()} title={graduationReason ?? "Signs migrateToDammV2"}>
+                {connected ? "Graduate to DAMM v2" : "Connect wallet to graduate"}
               </button>
             </div>
-            {!snapshot.complete && (
-              <p className="fine">
-                Graduation stays unsigned until quote reserve reaches {formatRaw(snapshot.migrationThreshold, quoteDecimals)}. On mainnet, Meteora keepers migrate eligible pools at the published thresholds. On devnet, this button is the manual path.
-              </p>
-            )}
+            {graduationReason && <p className="fine">{graduationReason}</p>}
             {damm?.exists && (
               <>
                 <div className="metric"><span>Liquidity</span><span className="mono">{damm.liquidity}</span></div>

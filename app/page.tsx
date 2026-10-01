@@ -40,16 +40,16 @@ export default function HomePage() {
       </section>
       <section className="steps">
         <article className="step">
-          <strong>01 · Config</strong>
-          <p>A partner config fixes the curve, fees, quote mint, and DAMM v2 migration settings.</p>
+          <strong>01 · Connect</strong>
+          <p>Use Phantom or Solflare on the header network. On devnet, fund the wallet from the Solana faucet and leave SOL for fees.</p>
         </article>
         <article className="step">
-          <strong>02 · Pool</strong>
-          <p>The creator initializes an SPL virtual pool. Buys and sells quote against the live curve.</p>
+          <strong>02 · Pick a book</strong>
+          <p>Flat stays near a reference price. Long thickens into the listing. Exponential opens thin, then the fee decays.</p>
         </article>
         <article className="step">
-          <strong>03 · Graduate</strong>
-          <p>When the quote threshold is met, migration builds a DAMM v2 pool. Mainnet keepers do this for eligible configs.</p>
+          <strong>03 · Sign, trade, graduate</strong>
+          <p>Two confirmed signatures create the DBC pool. Swaps fill the reserve. Graduation signs migrateToDammV2, then DAMM v2 can trade.</p>
         </article>
       </section>
       <section className="stat-row">

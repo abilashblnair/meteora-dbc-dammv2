@@ -1,6 +1,28 @@
 import type { NetworkProfile, QuoteKind } from "./constants";
 
 export type CurveShape = "flat" | "long" | "exponential";
+
+/** Plain-language guide for a first listing. Shown next to the preset, not only on hover. */
+export const SHAPE_GUIDE: Record<
+  CurveShape,
+  { title: string; hint: string; why: string }
+> = {
+  flat: {
+    title: "Flat",
+    hint: "Price climbs slowly while a large share of the float is sold.",
+    why: "Use this for a thinly traded name that should stay near a reference price.",
+  },
+  long: {
+    title: "Long",
+    hint: "The book gets deeper as the listing price approaches.",
+    why: "Use this when the equity needs a runway, not a one-candle open.",
+  },
+  exponential: {
+    title: "Exponential",
+    hint: "Opens thin, with a wide fee that decays as the book fills.",
+    why: "Use this for an IPO-style listing where graduation is the event.",
+  },
+};
 export type AccessTier = "free" | "paid";
 export type CurveBuilderKind =
   | "buildCurve"
