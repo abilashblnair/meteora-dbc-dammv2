@@ -1,0 +1,36 @@
+{
+  "name": "stockcurve",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Equity and RWA token launchpad on Solana using Meteora Dynamic Bonding Curve and DAMM v2.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "preview-curves": "tsx scripts/preview-curves.ts",
+    "build-config-tx": "tsx scripts/build-config-tx.ts"
+  },
+  "dependencies": {
+    "@meteora-ag/cp-amm-sdk": "^1.3.5",
+    "@meteora-ag/dynamic-bonding-curve-sdk": "^1.4.5",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/wallet-adapter-base": "^0.9.27",
+    "@solana/wallet-adapter-react": "^0.15.39",
+    "@solana/wallet-adapter-react-ui": "^0.9.39",
+    "@solana/wallet-adapter-wallets": "^0.19.37",
+    "@solana/web3.js": "^1.98.4",
+    "bn.js": "^5.2.2",
+    "next": "^15.5.4",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/bn.js": "^5.2.0",
+    "@types/node": "^22.18.6",
+    "@types/react": "^19.1.13",
+    "@types/react-dom": "^19.1.9",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
