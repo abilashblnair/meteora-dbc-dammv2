@@ -1,0 +1,10 @@
+{
+  "name": "Northwind Common",
+  "symbol": "NWND",
+  "description": "Example metadata for a StockCurve equity listing. Replace this file with the issuer's prospectus metadata before production use.",
+  "image": "https://example.com/stockcurve/northwind.png",
+  "attributes": [
+    { "trait_type": "Instrument", "value": "Tokenized common equity" },
+    { "trait_type": "Venue", "value": "Meteora DBC then DAMM v2" }
+  ]
+}
