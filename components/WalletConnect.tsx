@@ -16,6 +16,13 @@ export function WalletConnect() {
   const { wallet, publicKey, connected, connecting, disconnect } = useWallet();
   const [pickerOpen, setPickerOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const account = connected ? publicKey?.toBase58() : undefined;
+
+  // Connecting swaps this component to its connected layout, which remounts the picker, so the
+  // picker cannot close itself. Close it here whenever a wallet account becomes connected.
+  useEffect(() => {
+    if (account) setPickerOpen(false);
+  }, [account]);
 
   if (!connected || !publicKey) {
     return (
