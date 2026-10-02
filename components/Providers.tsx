@@ -2,10 +2,8 @@
 
 import { rpcUrlFor } from "@/lib/env";
 import { NETWORKS, type SolanaNetwork } from "@/lib/meteora/constants";
-import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
-import { PhantomWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets";
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
 const STORAGE_KEY = "stockcurve.network";
 
@@ -38,17 +36,15 @@ export function Providers({ children, initialNetwork }: { children: ReactNode; i
   );
 }
 
+const NO_LEGACY_ADAPTERS: [] = [];
+
 function SolanaBoundary({ network, children }: { network: SolanaNetwork; children: ReactNode }) {
   const endpoint = rpcUrlFor(network);
-  const wallets = useMemo(
-    () => [
-      new PhantomWalletAdapter(),
-      new SolflareWalletAdapter({
-        network: network === "devnet" ? WalletAdapterNetwork.Devnet : WalletAdapterNetwork.Mainnet,
-      }),
-    ],
-    [network],
-  );
+  // Wallet Standard only. Phantom and Solflare register themselves, and the standard adapter sends
+  // every transaction with the chain of this connection (solana:devnet or solana:mainnet). The legacy
+  // Solflare adapter signed through window.solflare without a chain, so Solflare treated devnet
+  // transactions as mainnet and showed a network-mismatch warning.
+  const wallets = NO_LEGACY_ADAPTERS;
 
   return (
     <ConnectionProvider endpoint={endpoint} config={{ commitment: "confirmed" }}>

@@ -1,5 +1,6 @@
 import { Providers } from "@/components/Providers";
 import { SiteFooter, SiteHeader } from "@/components/SiteHeader";
+import { WalletPickerProvider } from "@/components/WalletConnect";
 import { defaultNetwork } from "@/lib/env";
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
@@ -23,9 +24,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body>
         <Providers initialNetwork={defaultNetwork()}>
-          <SiteHeader />
-          <main className="shell">{children}</main>
-          <SiteFooter />
+          <WalletPickerProvider>
+            <SiteHeader />
+            <main className="shell">{children}</main>
+            <SiteFooter />
+          </WalletPickerProvider>
         </Providers>
       </body>
     </html>
