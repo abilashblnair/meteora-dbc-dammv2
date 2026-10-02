@@ -11,6 +11,33 @@ Hackathon track: Meteora DBC + DAMM v2, Superteam / Crypto World's Fair.
 | Architecture, user flow and sequence diagrams | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Investor deck | [StockCurve Investor Deck](https://claude.ai/artifact/51uGb5a9z78sABD6ZPe6GU) |
 | Judge checklist | [JUDGES.md](JUDGES.md) |
+| Test plan | [docs/TESTING.md](docs/TESTING.md) |
+| On-chain proof | [Devnet lifecycle, 9 transactions](#on-chain-proof-devnet) |
+
+## On-chain proof (devnet)
+
+One listing taken through the whole lifecycle from the live app on 2 October 2026: **Desk Flat**, sandbox profile, quoted in SOL, 0.5 SOL graduation threshold.
+
+| Account | Address |
+| --- | --- |
+| DBC virtual pool (pool desk) | [FAE9u2JN…ZmU](https://explorer.solana.com/address/FAE9u2JNAsY9pv56mqyRjcFLxYw1b1QT5zUMZAKXLZmU?cluster=devnet) · [open in StockCurve](https://meteora-dbc-dammv2.vercel.app/pool/FAE9u2JNAsY9pv56mqyRjcFLxYw1b1QT5zUMZAKXLZmU) |
+| DBC config | [55ej94Tn…iAAK](https://explorer.solana.com/address/55ej94Tnwa6mS2VEw3NzKk87G4jBci7rVu6KK472iAAK?cluster=devnet) |
+| Token mint | [DsX8H9iQ…fGps](https://explorer.solana.com/address/DsX8H9iQyu2NHtBCF3rnyzZSpSoxUGk3T92MewYjfGps?cluster=devnet) |
+| Graduated DAMM v2 pool | [5cwVNcZw…Pyub](https://explorer.solana.com/address/5cwVNcZwESnBSCyLgZHmuT1GxK46y6FbntzaGAaBPyub?cluster=devnet) |
+
+| # | Step | SDK call | Program instructions | Transaction |
+| --- | --- | --- | --- | --- |
+| 1 | Create config | `partner.createConfig` | CreateConfig | [5MDS5z9Y…](https://explorer.solana.com/tx/5MDS5z9YdwoskUvSfrsR4xEyvhTSQpSprfqWCBGoHifs35dYm3CoxbgLmemhWEVfKCi4UBWM6j3xgfW7kuQ7EviA?cluster=devnet) |
+| 2 | Create pool | `creator.createPool` | InitializeVirtualPoolWithSplToken | [2N2tuPY9…](https://explorer.solana.com/tx/2N2tuPY95AkzXFQ4J3NuLkACuXAwM5X5wKDfuVhzZK7QXFff8mQ4a5JDwJdyFRj5cXCobz2dSGgF56omUh1bJhU2?cluster=devnet) |
+| 3 | Curve trade | `pool.swap2` | Swap2 | [4DA82zGx…](https://explorer.solana.com/tx/4DA82zGxrXL4mphUkim7muhWwWgC9jbJRNtRRR9pPFTvYAvyQbcYndiCpakPSd2Nsp4kNoYknsXE4m2zpPG4x2jq?cluster=devnet) |
+| 4 | Curve trade | `pool.swap2` | Swap2 | [2Ev4apie…](https://explorer.solana.com/tx/2Ev4apien1abZmfG2KRFvQkYXkrB96cLrpyZ617U7PgnYP5gN8H2X7rhzTZL94yb8iETrGMmbgGwR1j4zoyLnC2E?cluster=devnet) |
+| 5 | Curve trade | `pool.swap2` | Swap2 | [3y4pSfTT…](https://explorer.solana.com/tx/3y4pSfTT3zS2R6smWuS6XqZSi913gZVQaeFWJCHVsDfg43bA7zyZhwRAyD29KSNF8yg4QCRHJrXHSKUrB8SzaoeU?cluster=devnet) |
+| 6 | Partial-fill buy to the threshold | `pool.swap2` | Swap2 | [4hSiVD1o…](https://explorer.solana.com/tx/4hSiVD1o6DaSkg6eKZzy5wSkMfxHMDqiM9gJ96VVFAR74WtpjBkQFFmexi1XBF3Aqiq2dLRftqSUVVcmsCbHK5tK?cluster=devnet) |
+| 7 | Graduate to DAMM v2 | `migration.migrateToDammV2` | MigrationDammV2, InitializePoolWithDynamicConfig, AddLiquidity, CreatePosition, PermanentLockPosition | [Jb8vBUHL…](https://explorer.solana.com/tx/Jb8vBUHLouFcFyfnY8p86k54cJtBcLXDJ1YWhmXB7x9CCK9tpHf7Qz9kfYCcFEzfjsPM7YfTcJrA5FifgJqtjX1?cluster=devnet) |
+| 8 | DAMM v2 trade | `CpAmm.swap2` | Swap2 | [5NhgWeF3…](https://explorer.solana.com/tx/5NhgWeF3adXLjkGd1sxu2aVww87aUhdckRZhidLQNC5J9FhB1Z7BVqutyq1rbiZiKTrvbGgPcPCGnUhE94bt8n2s?cluster=devnet) |
+| 9 | DAMM v2 trade | `CpAmm.swap2` | Swap2 | [5tZDRuWM…](https://explorer.solana.com/tx/5tZDRuWMaeFAvu2QdXmp43LK6MjzrZ67a7XDSoVwqmFCAVFYZRS3h2fbxjJHuLNYmfCLKJP1K9CnMqTpz1KZDyVr?cluster=devnet) |
+
+After step 7 the DBC pool reads `isMigrated = true` with migration progress "DAMM pool created", its quote reserve stands at 0.500000001 / 0.5 SOL, and `CpAmm.isPoolExist` is true for the derived DAMM v2 pool. `PermanentLockPosition` in the graduation transaction is the on-chain lock of the graduated liquidity.
 
 ## 60-second judge walkthrough
 
@@ -139,6 +166,7 @@ Devnet SOL: https://faucet.solana.com. Devnet USDC mint: `4zMMC9srt5Ri5X14GAgXha
 ```bash
 npm run preview-curves
 npm run build-config-tx
+npm run e2e-devnet
 npm run typecheck
 npm run build
 ```
