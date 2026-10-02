@@ -4,6 +4,8 @@ Use this with the 60-second walkthrough at the top of the README.
 
 Live app: https://meteora-dbc-dammv2.vercel.app (devnet by default; connect a devnet wallet with faucet SOL).
 
+On-chain proof: one listing taken from `createConfig` to a locked DAMM v2 pool and traded there, with every transaction linked, in the README's [On-chain proof (devnet)](README.md#on-chain-proof-devnet) section. Graduated DAMM v2 pool: [5cwVNcZw…Pyub](https://explorer.solana.com/address/5cwVNcZwESnBSCyLgZHmuT1GxK46y6FbntzaGAaBPyub?cluster=devnet).
+
 ## Depth of Meteora integration
 
 - [ ] Curve preview is produced by `buildCurve` / `buildCurveWithLiquidityWeights` / `buildCurveWithTwoSegments` in `lib/meteora/curve.ts`.

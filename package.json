@@ -9,7 +9,8 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "preview-curves": "tsx scripts/preview-curves.ts",
-    "build-config-tx": "tsx scripts/build-config-tx.ts"
+    "build-config-tx": "tsx scripts/build-config-tx.ts",
+    "e2e-devnet": "tsx scripts/e2e-devnet.ts"
   },
   "dependencies": {
     "@meteora-ag/cp-amm-sdk": "^1.3.5",
