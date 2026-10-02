@@ -16,11 +16,14 @@ import {
   type DammSnapshot,
   type PoolSnapshot,
 } from "@/lib/meteora/actions";
+import { NATIVE_SOL_MINT } from "@/lib/meteora/constants";
 import { rawFromUi, uiFromRaw } from "@/lib/meteora/curve";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Keypair, PublicKey, type Transaction } from "@solana/web3.js";
 import BN from "bn.js";
 import { useCallback, useEffect, useState } from "react";
+
+type QuoteRows = { label: string; value: string }[];
 
 export function PoolDesk({ address }: { address: string }) {
   const { network } = useNetwork();
@@ -34,9 +37,9 @@ export function PoolDesk({ address }: { address: string }) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [amount, setAmount] = useState("0.1");
   const [partialFill, setPartialFill] = useState(false);
-  const [quoteText, setQuoteText] = useState("");
+  const [quoteRows, setQuoteRows] = useState<QuoteRows>([]);
   const [dammAmount, setDammAmount] = useState("0.05");
-  const [dammQuote, setDammQuote] = useState("");
+  const [dammRows, setDammRows] = useState<QuoteRows>([]);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -92,11 +95,14 @@ export function PoolDesk({ address }: { address: string }) {
       });
       const outDecimals = side === "buy" ? snapshot.baseDecimals : snapshot.quoteDecimals;
       const minimum = quoted.quote.minimumAmountOut?.toString() ?? "0";
-      setQuoteText(
-        `Output ${formatRaw(quoted.quote.outputAmount.toString(), outDecimals)} · min ${formatRaw(minimum, outDecimals)} · fee ${formatRaw(quoted.quote.tradingFee.toString(), side === "buy" ? snapshot.quoteDecimals : snapshot.baseDecimals)} · left ${quoted.quote.amountLeft.toString()}`,
-      );
+      setQuoteRows([
+        { label: "You receive", value: formatRaw(quoted.quote.outputAmount.toString(), outDecimals) },
+        { label: "Minimum (1% slippage)", value: formatRaw(minimum, outDecimals) },
+        { label: "Trading fee", value: formatRaw(quoted.quote.tradingFee.toString(), side === "buy" ? snapshot.quoteDecimals : snapshot.baseDecimals) },
+        { label: "Unfilled input", value: quoted.quote.amountLeft.toString() },
+      ]);
     } catch (cause) {
-      setQuoteText("");
+      setQuoteRows([]);
       setError(explainError(cause));
     }
   }
@@ -176,11 +182,13 @@ export function PoolDesk({ address }: { address: string }) {
         slippagePercent: 1,
       });
       const outDecimals = side === "buy" ? snapshot.baseDecimals : snapshot.quoteDecimals;
-      setDammQuote(
-        `DAMM v2 output ${formatRaw(quoted.quote.outputAmount.toString(), outDecimals)} · min ${formatRaw(quoted.quote.minimumAmountOut?.toString() ?? "0", outDecimals)} · impact ${quoted.quote.priceImpact.toString()}`,
-      );
+      setDammRows([
+        { label: "You receive", value: formatRaw(quoted.quote.outputAmount.toString(), outDecimals) },
+        { label: "Minimum (1% slippage)", value: formatRaw(quoted.quote.minimumAmountOut?.toString() ?? "0", outDecimals) },
+        { label: "Price impact", value: quoted.quote.priceImpact.toString() },
+      ]);
     } catch (cause) {
-      setDammQuote("");
+      setDammRows([]);
       setError(explainError(cause));
     }
   }
@@ -232,131 +240,224 @@ export function PoolDesk({ address }: { address: string }) {
       })
     : "Read the pool before graduating.";
   const canGraduate = snapshot ? graduationReason === null && connected && !busy : false;
+  const quoteSymbol = snapshot ? (snapshot.quoteMint === NATIVE_SOL_MINT ? "SOL" : "USDC") : "";
+  const inputUnit = side === "buy" ? quoteSymbol : "base";
+  const statusSignature = status.includes("confirmed: ") ? status.split("confirmed: ")[1] : "";
+  const statusLabel = statusSignature ? status.split(":")[0] : status;
+  const phaseLabel = !snapshot ? "" : damm?.exists ? "DAMM v2 live" : snapshot.migrated ? "Graduated" : snapshot.complete ? "Ready to graduate" : "On the curve";
 
   return (
-    <div>
-      <p className="kicker">{network}</p>
-      <h1>Pool desk</h1>
-      <p className="lede mono">{address}</p>
-      <div className="actions">
+    <div className="pool-desk">
+      <div className="desk-head">
+        <div>
+          <p className="kicker">Pool desk · {network}</p>
+          <h1>{phaseLabel || "Pool desk"}</h1>
+          <div className="address-row">
+            <code>{shortKey(address, 10)}</code>
+            <CopyButton value={address} />
+            <a className="text-link" href={explorerAccount(address, network)} target="_blank" rel="noreferrer">Explorer ↗</a>
+          </div>
+        </div>
         <button className="button-secondary" type="button" onClick={() => void refresh()} disabled={loading}>
+          {loading && <span className="spinner" aria-hidden="true" />}
           {loading ? "Reading chain…" : "Refresh"}
         </button>
-        <a className="button-secondary" href={explorerAccount(address, network)}>Explorer</a>
       </div>
-      {error && <p className="status error">{error}</p>}
+      {error && <p className="status error" aria-live="assertive">{error}</p>}
       {status && (
-        <p className="status ok">
-          {status}{" "}
-          {status.includes("confirmed: ") && (
-            <a href={explorerTx(status.split("confirmed: ")[1], network)}>View transaction</a>
+        <p className="status ok" aria-live="polite">
+          {statusLabel}.{" "}
+          {statusSignature && (
+            <a href={explorerTx(statusSignature, network)} target="_blank" rel="noreferrer">View transaction ↗</a>
           )}
         </p>
       )}
       {loading && !snapshot && !error && (
-        <div className="paper">
+        <div className="paper empty">
+          <span className="spinner large" aria-hidden="true" />
           <h2>Reading the DBC account</h2>
-          <p>StockCurve is asking the RPC for this virtual pool. A missing account stays missing. A confirmed signature is the only success signal later.</p>
+          <p>Asking the RPC for this virtual pool. A missing account stays missing.</p>
         </div>
       )}
       {!loading && !snapshot && !error && (
-        <div className="paper">
-          <h2>No DBC pool on this network</h2>
-          <p>The header network is {network}. Switch it if this pool was created on the other cluster. StockCurve does not invent a pool that the RPC cannot read.</p>
+        <div className="paper empty">
+          <h2>No DBC pool on {network}</h2>
+          <p>Switch the network in the header if this pool was created on the other cluster. StockCurve does not invent a pool that the RPC cannot read.</p>
         </div>
       )}
       {snapshot && (
-        <div className="desk">
-          <section className="paper">
+        <>
+          <section className="paper progress-card">
             <Lifecycle
               stages={[
                 { label: "Config", state: "done", detail: "On this pool" },
                 { label: "Pool live", state: "done", detail: "DBC virtual pool" },
-                {
-                  label: "Reserve",
-                  state: snapshot.complete ? "done" : "current",
-                  detail: percent(progress),
-                },
+                { label: "Reserve", state: snapshot.complete ? "done" : "current", detail: percent(progress) },
                 {
                   label: "Graduated",
                   state: snapshot.migrated ? "done" : snapshot.complete ? "current" : "wait",
-                  detail: snapshot.migrated ? "Migration flag set" : "migrateToDammV2",
+                  detail: snapshot.migrated ? "Migrated" : "migrateToDammV2",
                 },
                 {
                   label: "DAMM v2",
                   state: damm?.exists ? "done" : snapshot.migrated ? "current" : "wait",
-                  detail: damm?.exists ? "Pool account found" : "Waiting for the account",
+                  detail: damm?.exists ? "Pool found" : "Waiting",
                 },
               ]}
             />
-            <h2>{snapshot.migrated ? "Graduated" : "On the curve"}</h2>
-            <div className="bar" aria-label="Quote progress to graduation">
+            <div className="progress-figures">
+              <div>
+                <span className="fine">Quote reserve</span>
+                <strong className="mono">
+                  {formatRaw(snapshot.quoteReserve, quoteDecimals)} <small>/ {formatRaw(snapshot.migrationThreshold, quoteDecimals)} {quoteSymbol}</small>
+                </strong>
+              </div>
+              <div className="progress-pct">
+                <span className="fine">To graduation</span>
+                <strong className="mono">{percent(progress)}</strong>
+              </div>
+            </div>
+            <div className="bar" role="progressbar" aria-label="Quote progress to graduation" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress * 100)}>
               <span style={{ width: `${progress * 100}%` }} />
             </div>
-            <p className="fine">{percent(progress)} of the migration quote threshold.</p>
-            <div className="metric"><span>Quote reserve</span><strong>{formatRaw(snapshot.quoteReserve, quoteDecimals)} / {formatRaw(snapshot.migrationThreshold, quoteDecimals)}</strong></div>
-            <div className="metric"><span>Base reserve</span><strong className="mono">{formatRaw(snapshot.baseReserve, snapshot.baseDecimals)}</strong></div>
-            <div className="metric"><span>Migration progress</span><strong>{snapshot.migrationProgress}</strong></div>
-            <div className="metric"><span>Migrated flag</span><strong>{snapshot.migrated ? "Yes" : "No"}</strong></div>
-            <div className="metric"><span>Config</span><a href={explorerAccount(snapshot.configAddress, network)}>{shortKey(snapshot.configAddress, 6)}</a></div>
-            <div className="metric"><span>Base mint</span><a href={explorerAccount(snapshot.baseMint, network)}>{shortKey(snapshot.baseMint, 6)}</a></div>
-            <div className="metric"><span>Quote mint</span><a href={explorerAccount(snapshot.quoteMint, network)}>{shortKey(snapshot.quoteMint, 6)}</a></div>
-            <div className="metric"><span>Creator</span><span className="mono">{shortKey(snapshot.creator, 6)}</span></div>
-            <div className="metric"><span>Sqrt price</span><span className="mono">{snapshot.sqrtPrice}</span></div>
-            <h3>DBC swap</h3>
-            <p className="fine">Quotes use `swapQuote2`. The swap is submitted with `swap2` and 100 bps slippage. Partial fill is for the last buy that would cross graduation.</p>
-            <div className="choice-row">
-              <button className={side === "buy" ? "active" : ""} type="button" onClick={() => setSide("buy")}>Buy base</button>
-              <button className={side === "sell" ? "active" : ""} type="button" onClick={() => setSide("sell")}>Sell base</button>
-            </div>
-            <div className="field">
-              <label htmlFor="amount">Amount in</label>
-              <input id="amount" value={amount} onChange={(event) => setAmount(event.target.value)} />
-            </div>
-            <label className="fine">
-              <input type="checkbox" checked={partialFill} onChange={(event) => setPartialFill(event.target.checked)} /> Partial fill
-            </label>
-            <div className="actions">
-              <button className="button-secondary" type="button" onClick={() => void onQuote()}>Quote</button>
-              <button className="button" type="button" onClick={() => void onSwap()} disabled={busy || snapshot.migrated || !connected} title={connected ? "Signs swap2" : "Connect a wallet first"}>
-                {connected ? "Sign swap" : "Connect wallet to swap"}
-              </button>
-            </div>
-            {quoteText && <p className="status">{quoteText}</p>}
-            {snapshot.migrated && <p className="fine">The DBC pool is migrated. Trade the DAMM v2 pool instead.</p>}
           </section>
-          <aside className="paper">
-            <h2>DAMM v2</h2>
-            <p className="fine">Derived pool {shortKey(snapshot.dammPool, 6)} from config {shortKey(snapshot.dammConfig, 4)}.</p>
-            <p>{damm?.exists ? "The graduated pool account is on this network." : "The graduated pool account is not on this network yet."}</p>
-            <div className="actions">
-              <button className="button moss" type="button" disabled={!canGraduate} onClick={() => void onGraduate()} title={graduationReason ?? "Signs migrateToDammV2"}>
-                {connected ? "Graduate to DAMM v2" : "Connect wallet to graduate"}
-              </button>
-            </div>
-            {graduationReason && <p className="fine">{graduationReason}</p>}
-            {damm?.exists && (
-              <>
-                <div className="metric"><span>Liquidity</span><span className="mono">{damm.liquidity}</span></div>
-                <div className="field">
-                  <label htmlFor="damm-amount">DAMM amount in</label>
-                  <input id="damm-amount" value={dammAmount} onChange={(event) => setDammAmount(event.target.value)} />
+          <div className="desk">
+            <section className="paper trade-card">
+              <div className="card-head">
+                <h2>Trade the curve</h2>
+                <span className="pill mono">swap2</span>
+              </div>
+              {snapshot.migrated ? (
+                <p className="status">The DBC pool has migrated. Trade the DAMM v2 pool instead.</p>
+              ) : (
+                <>
+                  <div className="segmented wide" role="tablist" aria-label="Side">
+                    <button className={side === "buy" ? "active buy" : ""} type="button" onClick={() => { setSide("buy"); setQuoteRows([]); }} aria-pressed={side === "buy"}>Buy</button>
+                    <button className={side === "sell" ? "active sell" : ""} type="button" onClick={() => { setSide("sell"); setQuoteRows([]); }} aria-pressed={side === "sell"}>Sell</button>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="amount">{side === "buy" ? `Spend (${quoteSymbol})` : "Sell (base token)"}</label>
+                    <div className="input-affix">
+                      <input id="amount" inputMode="decimal" value={amount} onChange={(event) => { setAmount(event.target.value); setQuoteRows([]); }} />
+                      <span>{inputUnit}</span>
+                    </div>
+                  </div>
+                  <label className="check">
+                    <input type="checkbox" checked={partialFill} onChange={(event) => setPartialFill(event.target.checked)} />
+                    <span>Partial fill <span className="fine">for the last buy that would cross graduation</span></span>
+                  </label>
+                  {quoteRows.length > 0 && <QuoteTable rows={quoteRows} />}
+                  <div className="actions">
+                    <button className="button-secondary" type="button" onClick={() => void onQuote()}>Get quote</button>
+                    <button className={`button ${side === "sell" ? "danger" : "moss"}`} type="button" onClick={() => void onSwap()} disabled={busy || !connected} title={connected ? "Signs swap2" : "Connect a wallet first"}>
+                      {busy && <span className="spinner" aria-hidden="true" />}
+                      {connected ? (side === "buy" ? "Sign buy" : "Sign sell") : "Connect wallet to trade"}
+                    </button>
+                  </div>
+                  <p className="fine">Quotes use <code>swapQuote2</code>; swaps go through <code>swap2</code> with 100 bps slippage.</p>
+                </>
+              )}
+            </section>
+            <aside className="desk-side">
+              <section className={`paper graduate-card ${canGraduate ? "ready" : ""}`}>
+                <div className="card-head">
+                  <h2>DAMM v2</h2>
+                  <span className={`pill ${damm?.exists ? "ok" : ""}`}>{damm?.exists ? "Live" : snapshot.migrated ? "Migrating" : "Not yet"}</span>
                 </div>
-                <div className="actions">
-                  <button className="button-secondary" type="button" onClick={() => void onDammQuote()}>Quote DAMM</button>
-                  <button className="button" type="button" onClick={() => void onDammSwap()} disabled={busy || !connected}>Sign DAMM swap</button>
-                </div>
-                {dammQuote && <p className="status">{dammQuote}</p>}
-                <p className="fine">Quote and swap use `CpAmm.getQuote2` and `CpAmm.swap2`.</p>
-              </>
-            )}
-            <p className="fine">
-              Raw threshold {snapshot.migrationThreshold}. UI threshold {uiFromRaw(new BN(snapshot.migrationThreshold), quoteDecimals)} quote units.
-            </p>
-            <a href={explorerAccount(snapshot.dammPool, network)}>Open derived DAMM address</a>
-          </aside>
-        </div>
+                {!damm?.exists && (
+                  <>
+                    <p>{snapshot.complete ? "The reserve is full. Sign the migration to open the DAMM v2 pool." : "The pool graduates once the quote reserve reaches the threshold."}</p>
+                    <button className="button moss block" type="button" disabled={!canGraduate} onClick={() => void onGraduate()} title={graduationReason ?? "Signs migrateToDammV2"}>
+                      {busy && canGraduate && <span className="spinner" aria-hidden="true" />}
+                      {connected ? "Graduate to DAMM v2" : "Connect wallet to graduate"}
+                    </button>
+                    {graduationReason && <p className="fine">{graduationReason}</p>}
+                  </>
+                )}
+                {damm?.exists && (
+                  <>
+                    <div className="segmented wide" role="tablist" aria-label="DAMM side">
+                      <button className={side === "buy" ? "active buy" : ""} type="button" onClick={() => { setSide("buy"); setDammRows([]); }}>Buy</button>
+                      <button className={side === "sell" ? "active sell" : ""} type="button" onClick={() => { setSide("sell"); setDammRows([]); }}>Sell</button>
+                    </div>
+                    <div className="field">
+                      <label htmlFor="damm-amount">{side === "buy" ? `Spend (${quoteSymbol})` : "Sell (base token)"}</label>
+                      <div className="input-affix">
+                        <input id="damm-amount" inputMode="decimal" value={dammAmount} onChange={(event) => { setDammAmount(event.target.value); setDammRows([]); }} />
+                        <span>{inputUnit}</span>
+                      </div>
+                    </div>
+                    {dammRows.length > 0 && <QuoteTable rows={dammRows} />}
+                    <div className="actions">
+                      <button className="button-secondary" type="button" onClick={() => void onDammQuote()}>Get quote</button>
+                      <button className="button" type="button" onClick={() => void onDammSwap()} disabled={busy || !connected}>
+                        {busy && <span className="spinner" aria-hidden="true" />}
+                        Sign DAMM swap
+                      </button>
+                    </div>
+                    <p className="fine">Uses <code>CpAmm.getQuote2</code> and <code>CpAmm.swap2</code>. Liquidity <span className="mono">{damm.liquidity}</span>.</p>
+                  </>
+                )}
+                <a className="text-link" href={explorerAccount(snapshot.dammPool, network)} target="_blank" rel="noreferrer">
+                  Derived pool {shortKey(snapshot.dammPool, 4)} ↗
+                </a>
+              </section>
+              <details className="paper details-card">
+                <summary>Pool details</summary>
+                <dl className="kv">
+                  <div><dt>Config</dt><dd><a href={explorerAccount(snapshot.configAddress, network)} target="_blank" rel="noreferrer">{shortKey(snapshot.configAddress, 6)}</a></dd></div>
+                  <div><dt>Base mint</dt><dd><a href={explorerAccount(snapshot.baseMint, network)} target="_blank" rel="noreferrer">{shortKey(snapshot.baseMint, 6)}</a></dd></div>
+                  <div><dt>Quote mint</dt><dd><a href={explorerAccount(snapshot.quoteMint, network)} target="_blank" rel="noreferrer">{shortKey(snapshot.quoteMint, 6)}</a></dd></div>
+                  <div><dt>Creator</dt><dd className="mono">{shortKey(snapshot.creator, 6)}</dd></div>
+                  <div><dt>Base reserve</dt><dd className="mono">{formatRaw(snapshot.baseReserve, snapshot.baseDecimals)}</dd></div>
+                  <div><dt>Migration progress</dt><dd className="mono">{snapshot.migrationProgress}</dd></div>
+                  <div><dt>Migrated flag</dt><dd>{snapshot.migrated ? "Yes" : "No"}</dd></div>
+                  <div><dt>DAMM config</dt><dd className="mono">{shortKey(snapshot.dammConfig, 4)}</dd></div>
+                  <div><dt>Sqrt price</dt><dd className="mono">{snapshot.sqrtPrice}</dd></div>
+                  <div><dt>Raw threshold</dt><dd className="mono">{snapshot.migrationThreshold} ({uiFromRaw(new BN(snapshot.migrationThreshold), quoteDecimals)} {quoteSymbol})</dd></div>
+                </dl>
+              </details>
+            </aside>
+          </div>
+        </>
       )}
     </div>
+  );
+}
+
+function QuoteTable({ rows }: { rows: QuoteRows }) {
+  return (
+    <dl className="quote-table" aria-live="polite">
+      {rows.map((row) => (
+        <div key={row.label}>
+          <dt>{row.label}</dt>
+          <dd className="mono">{row.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="icon-button small"
+      type="button"
+      aria-label={copied ? "Copied" : "Copy address"}
+      title={copied ? "Copied" : "Copy address"}
+      onClick={() => {
+        void navigator.clipboard.writeText(value).then(() => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1400);
+        });
+      }}
+    >
+      {copied ? (
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+      ) : (
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5" y="5" width="9" height="9" rx="2" fill="none" stroke="currentColor" strokeWidth="1.6" /><path d="M11 5V3.5A1.5 1.5 0 0 0 9.5 2h-6A1.5 1.5 0 0 0 2 3.5v6A1.5 1.5 0 0 0 3.5 11H5" fill="none" stroke="currentColor" strokeWidth="1.6" /></svg>
+      )}
+    </button>
   );
 }

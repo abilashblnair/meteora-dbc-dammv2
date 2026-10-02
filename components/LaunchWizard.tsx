@@ -1,15 +1,15 @@
 "use client";
 
-import { CurveChart, priceLabel } from "@/components/CurveChart";
+import { CurveChart } from "@/components/CurveChart";
 import { DemoUnlock, useDemoUnlock } from "@/components/DemoUnlock";
 import { Lifecycle } from "@/components/Lifecycle";
 import { useNetwork } from "@/components/Providers";
 import { explainError } from "@/lib/errors";
-import { explorerTx } from "@/lib/format";
+import { explorerTx, formatPrice, formatTokens, shortKey } from "@/lib/format";
 import { decidePresetAccess } from "@/lib/marketplace/access";
 import { buildConfigTransaction, buildPoolTransaction } from "@/lib/meteora/actions";
 import { KEEPER_MIN_QUOTE, quoteMintFor, type NetworkProfile, type QuoteKind } from "@/lib/meteora/constants";
-import { previewPreset } from "@/lib/meteora/curve";
+import { BASE_DECIMALS, previewPreset } from "@/lib/meteora/curve";
 import { LAUNCH_PRESETS, SHAPE_GUIDE, getPreset, type LaunchPreset } from "@/lib/meteora/presets";
 import { writeLaunch } from "@/lib/storage";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
@@ -156,33 +156,57 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
     }
   }
 
+  const stepDone = [true, name.trim().length > 0 && symbol.trim().length > 0, false];
+
   return (
     <div className="wizard">
-      <div className="steps-nav">
-        {STEPS.map((label, index) => (
-          <button key={label} className={index === step ? "active" : ""} type="button" onClick={() => setStep(index)}>
-            0{index + 1} {label}
-          </button>
-        ))}
-      </div>
-      <div className="paper">
-        <DemoUnlock enabled={unlock.enabled} forced={unlock.forced} onChange={unlock.setEnabled} />
+      <aside className="wizard-side">
+        <ol className="steps-nav">
+          {STEPS.map((label, index) => (
+            <li key={label}>
+              <button
+                className={`${index === step ? "active" : ""} ${index < step && stepDone[index] ? "done" : ""}`}
+                type="button"
+                onClick={() => setStep(index)}
+                disabled={busy || (index > 0 && !access.allowed)}
+                aria-current={index === step ? "step" : undefined}
+              >
+                <span className="steps-num">{index < step && stepDone[index] ? "✓" : index + 1}</span>
+                {label}
+              </button>
+            </li>
+          ))}
+        </ol>
+        <dl className="summary">
+          <div><dt>Book</dt><dd>{preset.name}</dd></div>
+          <div><dt>Shape</dt><dd>{SHAPE_GUIDE[preset.shape].title}</dd></div>
+          <div><dt>Token</dt><dd>{name || "—"} · {symbol || "—"}</dd></div>
+          <div><dt>Quote</dt><dd>{quote}</dd></div>
+          <div><dt>Profile</dt><dd>{profile === "sandbox" ? "Sandbox" : "Keeper"}</dd></div>
+          <div>
+            <dt>Graduates at</dt>
+            <dd>{preview.value ? `${preview.value.migrationQuote} ${quote}` : "—"}</dd>
+          </div>
+          <div><dt>Network</dt><dd>{network}</dd></div>
+        </dl>
+      </aside>
+      <div className="paper wizard-main">
         <Lifecycle
           stages={[
             {
               label: "Config",
               state: configSignature ? "done" : phase === "config" ? "current" : "wait",
-              detail: configSignature ? "Signature confirmed" : "partner.createConfig",
+              detail: configSignature ? "Confirmed" : "createConfig",
             },
             {
               label: "Pool live",
               state: poolSignature ? "done" : phase === "pool" ? "current" : "wait",
-              detail: poolSignature ? "Signature confirmed" : "creator.createPool",
+              detail: poolSignature ? "Confirmed" : "createPool",
             },
             {
               label: "Reserve",
               state: poolSignature ? "current" : "wait",
-              detail: "Fills on the pool desk",
+              detail: "Fills on the desk",
             },
             {
               label: "Graduated",
@@ -198,18 +222,24 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
         />
         {step === 0 && (
           <>
-            <h2>Choose a book</h2>
-            <p>Flat holds a reference price. Long gives the name a runway. Exponential is an opening print with a fee that starts wide because the book is thin.</p>
-            <div className="preset-pick">
+            <div className="panel-head">
+              <h2>Choose a book</h2>
+              <p>Flat holds a reference price. Long gives the name a runway. Exponential is an opening print with a fee that starts wide because the book is thin.</p>
+            </div>
+            <div className="preset-pick" role="radiogroup" aria-label="Preset">
               {LAUNCH_PRESETS.map((item) => (
                 <PresetChoice key={item.id} preset={item} active={item.id === preset.id} unlockEnabled={unlock.enabled} onSelect={() => setPresetId(item.id)} />
               ))}
             </div>
+            <DemoUnlock enabled={unlock.enabled} forced={unlock.forced} onChange={unlock.setEnabled} />
           </>
         )}
         {step === 1 && (
           <>
-            <h2>Listing terms</h2>
+            <div className="panel-head">
+              <h2>Listing terms</h2>
+              <p>The name, symbol and metadata are written to the mint by <code>createPool</code>.</p>
+            </div>
             <div className="form-grid">
               <div className="field">
                 <label htmlFor="name">Token name</label>
@@ -222,59 +252,66 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
               <div className="field wide">
                 <label htmlFor="uri">Metadata URI</label>
                 <input id="uri" value={uri} onChange={(event) => setUri(event.target.value)} />
-                <span className="fine">Stored on the mint. Host `public/token-metadata.json` and replace this placeholder before a production listing.</span>
+                <span className="hint">
+                  Host your own JSON (see <code>public/token-metadata.json</code>) and replace this placeholder before a production listing.
+                </span>
               </div>
             </div>
-            <p className="fine">Quote token</p>
-            <div className="choice-row">
-              {(["SOL", "USDC"] as const).map((item) => (
-                <button key={item} className={item === quote ? "active" : ""} type="button" onClick={() => setQuote(item)}>
-                  {item}
-                </button>
-              ))}
+            <div className="option-group">
+              <span className="option-label">Quote token</span>
+              <div className="segmented">
+                {(["SOL", "USDC"] as const).map((item) => (
+                  <button key={item} className={item === quote ? "active" : ""} type="button" onClick={() => setQuote(item)} aria-pressed={item === quote}>
+                    {item}
+                  </button>
+                ))}
+              </div>
             </div>
-            <p className="fine">Graduation profile</p>
-            <div className="choice-row">
-              <button className={profile === "sandbox" ? "active" : ""} type="button" onClick={() => setProfile("sandbox")}>
-                Sandbox threshold
-              </button>
-              <button className={profile === "keeper" ? "active" : ""} type="button" onClick={() => setProfile("keeper")}>
-                Keeper threshold
-              </button>
+            <div className="option-group">
+              <span className="option-label">Graduation profile</span>
+              <div className="option-cards">
+                <button className={profile === "sandbox" ? "active" : ""} type="button" onClick={() => setProfile("sandbox")} aria-pressed={profile === "sandbox"}>
+                  <strong>Sandbox</strong>
+                  <span>Small threshold you can fill with faucet SOL. Graduate it yourself from the pool desk.</span>
+                </button>
+                <button className={profile === "keeper" ? "active" : ""} type="button" onClick={() => setProfile("keeper")} aria-pressed={profile === "keeper"}>
+                  <strong>Keeper</strong>
+                  <span>At least {KEEPER_MIN_QUOTE.SOL} SOL or {KEEPER_MIN_QUOTE.USDC} USDC, so Meteora keepers migrate it on mainnet.</span>
+                </button>
+              </div>
             </div>
           </>
         )}
         {step === 2 && preview.value && (
           <>
-            <h2>Prospectus</h2>
-            <CurveChart
-              points={preview.value.points}
-              startLabel={priceLabel(preview.value.startPrice, quote)}
-              endLabel={priceLabel(preview.value.endPrice, quote)}
-            />
-            <table className="review-table">
-              <tbody>
-                <tr><th>Preset</th><td>{preset.name} · {preset.builder}</td></tr>
-                <tr><th>Network</th><td>{network}</td></tr>
-                <tr><th>Quote</th><td>{quoteMintFor(network, quote).toBase58()}</td></tr>
-                <tr><th>Fee</th><td>{preset.feeLabel}. Issuer share of trading fees: {preset.creatorTradingFeePercentage}%.</td></tr>
-                <tr><th>Graduation</th><td>{preview.value.migrationQuote} {quote}. DAMM v2 config {preview.value.dammConfig}.</td></tr>
-                <tr><th>Liquidity</th><td>80% issuer permanent lock, 20% partner permanent lock. No unlocked LP.</td></tr>
-                <tr><th>Sample buy</th><td>{preview.value.sampleBuyAmount} {quote} quotes {preview.value.sampleOutputRaw} base units before the pool exists.</td></tr>
-              </tbody>
-            </table>
+            <div className="panel-head">
+              <h2>Prospectus</h2>
+              <p>Everything below is computed by the DBC SDK from the exact config you are about to sign.</p>
+            </div>
+            <CurveChart profile={preview.value.profile} quote={quote} />
+            <dl className="review-list">
+              <div><dt>Preset</dt><dd>{preset.name} <span className="mono fine">{preset.builder}</span></dd></div>
+              <div><dt>Network</dt><dd>{network}</dd></div>
+              <div><dt>Quote mint</dt><dd className="mono">{shortKey(quoteMintFor(network, quote).toBase58(), 6)} ({quote})</dd></div>
+              <div><dt>Price range</dt><dd className="mono">{formatPrice(preview.value.startPrice)} → {formatPrice(preview.value.endPrice)} {quote}</dd></div>
+              <div><dt>Fee</dt><dd>{preset.feeLabel}. Issuer share of trading fees: {preset.creatorTradingFeePercentage}%.</dd></div>
+              <div><dt>Graduation</dt><dd>{preview.value.migrationQuote} {quote} into DAMM v2 <span className="mono fine">{shortKey(preview.value.dammConfig, 4)}</span></dd></div>
+              <div><dt>Liquidity</dt><dd>80% issuer and 20% partner, both permanently locked. No unlocked LP.</dd></div>
+              <div><dt>Sample buy</dt><dd>{preview.value.sampleBuyAmount} {quote} → {formatTokens(preview.value.sampleOutputRaw, BASE_DECIMALS)} tokens</dd></div>
+            </dl>
             {keeperGap && <p className="status">{keeperGap}</p>}
             {!access.allowed && <p className="status error">{access.reason}</p>}
             {access.demoUnlock && <p className="status">{access.reason}</p>}
             {!connected && (
               <p className="status">
-                Connect Phantom or Solflare on {network} before signing. Devnet SOL comes from https://faucet.solana.com. Leave a little extra for fees.
+                Connect Phantom or Solflare on {network} before signing. Devnet SOL comes from{" "}
+                <a href="https://faucet.solana.com" target="_blank" rel="noreferrer">faucet.solana.com</a>. Leave a little extra for fees.
               </p>
             )}
           </>
         )}
         {step === 2 && preview.error && <p className="status error">{preview.error}</p>}
-        <div className="actions">
+        <div className="actions wizard-actions">
           {step > 0 && (
             <button className="button-secondary" type="button" onClick={() => setStep(step - 1)} disabled={busy}>
               Back
@@ -287,27 +324,25 @@ export function LaunchWizard({ initialPreset }: { initialPreset?: string }) {
           )}
           {step === 2 && (
             <button className="button moss" type="button" onClick={launch} disabled={busy || !access.allowed || !preview.value}>
+              {busy && <span className="spinner" aria-hidden="true" />}
               {busy ? "Signing…" : "Create config and pool"}
             </button>
           )}
         </div>
-        {status && <p className="status ok">{status}</p>}
-        {error && <p className="status error">{error}</p>}
-        {poolAddress && (
-          <p>
-            <Link className="button" href={`/pool/${poolAddress}`}>Open pool desk</Link>
-          </p>
-        )}
-        {(configSignature || poolSignature) && (
-          <p className="fine">
+        {status && <p className="status ok" aria-live="polite">{status}</p>}
+        {error && <p className="status error" aria-live="assertive">{error}</p>}
+        {(configSignature || poolSignature || poolAddress) && (
+          <div className="tx-links">
             {configSignature && (
-              <>
-                <a href={explorerTx(configSignature, network)}>Config transaction</a>
-                {" · "}
-              </>
+              <a className="button-secondary small" href={explorerTx(configSignature, network)} target="_blank" rel="noreferrer">Config tx ↗</a>
             )}
-            {poolSignature && <a href={explorerTx(poolSignature, network)}>Pool transaction</a>}
-          </p>
+            {poolSignature && (
+              <a className="button-secondary small" href={explorerTx(poolSignature, network)} target="_blank" rel="noreferrer">Pool tx ↗</a>
+            )}
+            {poolAddress && (
+              <Link className="button small" href={`/pool/${poolAddress}`}>Open pool desk →</Link>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -328,10 +363,23 @@ function PresetChoice({
   const access = decidePresetAccess(preset, unlockEnabled);
   const shape = SHAPE_GUIDE[preset.shape];
   return (
-    <button className={active ? "active" : ""} type="button" onClick={onSelect} disabled={!access.allowed} title={shape.why}>
-      <strong>{preset.name}</strong>
-      <div className="fine">{shape.title}. {shape.hint}</div>
-      <div className="fine">{access.demoUnlock ? "Demo unlock. No payment collected." : access.allowed ? preset.suitedFor : "Listed preset. Payment provider required."}</div>
+    <button
+      className={active ? "active" : ""}
+      type="button"
+      role="radio"
+      aria-checked={active}
+      onClick={onSelect}
+      disabled={!access.allowed}
+      title={shape.why}
+    >
+      <span className="preset-pick-head">
+        <strong>{preset.name}</strong>
+        <span className={`tag ${preset.access}`}>{preset.access === "free" ? "Free" : access.demoUnlock ? "Demo" : "Locked"}</span>
+      </span>
+      <span className="fine">{shape.title}. {shape.hint}</span>
+      <span className="fine">
+        {access.demoUnlock ? "Demo unlock. No payment collected." : access.allowed ? preset.suitedFor : "Listed preset. Payment provider required."}
+      </span>
     </button>
   );
 }

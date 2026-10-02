@@ -27,16 +27,23 @@ import type { NetworkProfile, QuoteKind } from "./constants";
 import { quoteDecimals } from "./constants";
 import type { LaunchPreset } from "./presets";
 
-const BASE_DECIMALS = TokenDecimal.SIX;
+export const BASE_DECIMALS = TokenDecimal.SIX;
 
 export interface CurvePoint {
   price: number;
   liquidity: string;
 }
 
+/** One sample on the curve: price after `raised` quote tokens have been bought in. */
+export interface ProfilePoint {
+  raised: number;
+  price: number;
+}
+
 export interface CurvePreview {
   config: ConfigParameters;
   points: CurvePoint[];
+  profile: ProfilePoint[];
   startPrice: number;
   endPrice: number;
   migrationQuote: number;
@@ -217,6 +224,43 @@ export function curvePoints(config: ConfigParameters, quote: QuoteKind): CurvePo
   return points;
 }
 
+const SAMPLES_PER_SEGMENT = 24;
+
+/**
+ * Price as a function of quote raised, from the start price to graduation.
+ * Inside a DBC segment, quote in is linear in sqrt price: liquidity * (sqrtB - sqrtA) >> 128,
+ * so sampling sqrt price evenly per segment traces the exact curve the program walks.
+ */
+export function curveProfile(config: ConfigParameters, quote: QuoteKind): ProfilePoint[] {
+  const graduationSqrt = getMigrationThresholdPrice(
+    config.migrationQuoteThreshold,
+    config.sqrtStartPrice,
+    config.curve.filter((segment) => !segment.liquidity.isZero()),
+  );
+  const scale = 10 ** quoteDecimals(quote);
+  const profile: ProfilePoint[] = [{ raised: 0, price: priceOf(config.sqrtStartPrice, quote) }];
+  let lower = config.sqrtStartPrice;
+  let raisedRaw = new BN(0);
+  for (const segment of config.curve) {
+    if (lower.gte(graduationSqrt)) break;
+    const upper = BN.min(segment.sqrtPrice, graduationSqrt);
+    if (upper.lte(lower)) continue;
+    if (segment.liquidity.isZero()) {
+      lower = upper;
+      continue;
+    }
+    const span = upper.sub(lower);
+    for (let step = 1; step <= SAMPLES_PER_SEGMENT; step += 1) {
+      const sqrt = lower.add(span.muln(step).divn(SAMPLES_PER_SEGMENT));
+      const raw = raisedRaw.add(segment.liquidity.mul(sqrt.sub(lower)).shrn(128));
+      profile.push({ raised: Number(raw.toString()) / scale, price: priceOf(sqrt, quote) });
+    }
+    raisedRaw = raisedRaw.add(segment.liquidity.mul(span).shrn(128));
+    lower = upper;
+  }
+  return profile;
+}
+
 let previewClient: DynamicBondingCurveClient | null = null;
 
 function clientForQuotes(): DynamicBondingCurveClient {
@@ -260,6 +304,7 @@ export function previewPreset(
   return {
     config,
     points,
+    profile: curveProfile(config, quote),
     startPrice: points[0]?.price ?? 0,
     endPrice: points[points.length - 1]?.price ?? 0,
     migrationQuote: uiFromRaw(config.migrationQuoteThreshold, quoteDecimals(quote)),

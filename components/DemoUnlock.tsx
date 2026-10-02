@@ -34,15 +34,17 @@ export function DemoUnlock({
   onChange: (next: boolean) => void;
 }) {
   return (
-    <div className="demo-banner">
-      <label>
+    <div className={`demo-banner ${enabled ? "on" : ""}`}>
+      <label className="switch">
         <input
           type="checkbox"
+          role="switch"
           checked={enabled}
           disabled={forced}
           onChange={(event) => onChange(event.target.checked)}
-        />{" "}
-        Judge demo unlock
+        />
+        <span className="switch-track" aria-hidden="true" />
+        <span className="switch-label">Judge demo unlock</span>
       </label>
       <p>
         {enabled

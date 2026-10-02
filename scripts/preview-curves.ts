@@ -35,6 +35,13 @@ for (const preset of LAUNCH_PRESETS) {
         }
         if (preview.points.length < 2) throw new Error("curve has no segments");
         if (preview.config.curve.length === 0) throw new Error("empty curve");
+        const tip = preview.profile[preview.profile.length - 1];
+        if (!tip || Math.abs(tip.raised - preview.migrationQuote) / preview.migrationQuote > 0.001) {
+          throw new Error(`profile ends at ${tip?.raised} raised, threshold is ${preview.migrationQuote}`);
+        }
+        if (Math.abs(tip.price - preview.endPrice) / preview.endPrice > 0.001) {
+          throw new Error(`profile ends at price ${tip.price}, graduation price is ${preview.endPrice}`);
+        }
         if (BigInt(preview.sampleOutputRaw) <= 0n) throw new Error("sample buy output is zero");
         if (profile === "keeper" && preview.migrationQuote + 1e-6 < KEEPER_MIN_QUOTE[quote]) {
           throw new Error(
@@ -49,6 +56,7 @@ for (const preset of LAUNCH_PRESETS) {
             `threshold=${preview.migrationQuote}`,
             `price=${preview.startPrice.toExponential(3)}→${preview.endPrice.toExponential(3)}`,
             `buyOut=${preview.sampleOutputRaw}`,
+            `samples=${preview.profile.length}`,
             `damm=${preview.dammConfig.slice(0, 4)}…`,
           ].join("  "),
         );

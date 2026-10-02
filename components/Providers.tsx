@@ -4,10 +4,8 @@ import { rpcUrlFor } from "@/lib/env";
 import { NETWORKS, type SolanaNetwork } from "@/lib/meteora/constants";
 import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
-import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets";
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import "@solana/wallet-adapter-react-ui/styles.css";
 
 const STORAGE_KEY = "stockcurve.network";
 
@@ -55,7 +53,7 @@ function SolanaBoundary({ network, children }: { network: SolanaNetwork; childre
   return (
     <ConnectionProvider endpoint={endpoint} config={{ commitment: "confirmed" }}>
       <WalletProvider wallets={wallets} autoConnect>
-        <WalletModalProvider>{children}</WalletModalProvider>
+        {children}
       </WalletProvider>
     </ConnectionProvider>
   );
@@ -64,17 +62,21 @@ function SolanaBoundary({ network, children }: { network: SolanaNetwork; childre
 export function NetworkSelect() {
   const { network, setNetwork } = useNetwork();
   return (
-    <select
-      className="network-select"
-      aria-label="Solana network"
-      value={network}
-      onChange={(event) => setNetwork(event.target.value as SolanaNetwork)}
-    >
+    <div className="network-toggle" role="radiogroup" aria-label="Solana network">
       {NETWORKS.map((item) => (
-        <option key={item} value={item}>
-          {item}
-        </option>
+        <button
+          key={item}
+          type="button"
+          role="radio"
+          aria-checked={item === network}
+          className={`${item === network ? "active" : ""} ${item === "devnet" ? "devnet" : "mainnet"}`}
+          onClick={() => setNetwork(item)}
+        >
+          <span className="dot" aria-hidden="true" />
+          <span className="label-full">{item === "devnet" ? "Devnet" : "Mainnet"}</span>
+          <span className="label-short" aria-hidden="true">{item === "devnet" ? "Dev" : "Main"}</span>
+        </button>
       ))}
-    </select>
+    </div>
   );
 }
