@@ -4,15 +4,23 @@ Equity and RWA launch desk on Solana. Price discovery runs on Meteora Dynamic Bo
 
 Hackathon track: Meteora DBC + DAMM v2, Superteam / Crypto World's Fair.
 
+**Live app:** https://meteora-dbc-dammv2.vercel.app (devnet by default)
+
+| | |
+| --- | --- |
+| Architecture, user flow and sequence diagrams | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Investor deck | [StockCurve Investor Deck](https://claude.ai/artifact/51uGb5a9z78sABD6ZPe6GU) |
+| Judge checklist | [JUDGES.md](JUDGES.md) |
+
 ## 60-second judge walkthrough
 
-1. `npm install && cp .env.example .env.local && npm run dev`, then open http://localhost:3000.
-2. The homepage curve is a real DBC SDK preview of **Desk Flat** (no wallet). The three steps under it are connect, pick a book, sign then graduate.
+1. Open https://meteora-dbc-dammv2.vercel.app. To run locally instead: `npm install && cp .env.example .env.local && npm run dev`, then open http://localhost:3000.
+2. The homepage chart is the real **Desk Flat** curve, price against SOL raised, traced from the DBC config segments (no wallet). Hover it for the price at any point. Preset cards show each book's own curve shape.
 3. Open **Presets**. Read Flat / Long / Exponential. Click **paid**. Prime Book stays locked. The **Judge demo unlock** switch is labeled and collects no SOL. Leave it off unless you want to sign that preset.
 4. Open **Launch**, keep Desk Flat, quote SOL, profile **Sandbox**, and continue to Review. The prospectus quote comes from `getQuoteFromInputAmount`.
-5. Connect Phantom or Solflare on **devnet** with faucet SOL. **Create config and pool** asks for two signatures: `createConfig`, then `createPool`. The lifecycle turns green only after each signature confirms. The Book page then lists the pool.
-6. On the pool desk, **Quote** then **Sign swap**. That is `swapQuote2` / `swap2` on the live DBC pool.
-7. **Graduate to DAMM v2** stays disabled until the quote reserve reaches the threshold. The button then signs `migrateToDammV2`. When `CpAmm.isPoolExist` is true, **Quote DAMM** / **Sign DAMM swap** trade the graduated pool.
+5. **Connect wallet** in the header (Devnet selected) with Phantom or Solflare and faucet SOL. **Create config and pool** asks for two signatures: `createConfig`, then `createPool`. The lifecycle turns green only after each signature confirms. The Book page then lists the pool.
+6. On the pool desk, pick **Buy**, then **Get quote** and **Sign buy**. That is `swapQuote2` / `swap2` on the live DBC pool.
+7. **Graduate to DAMM v2** stays disabled until the quote reserve reaches the threshold. The button then signs `migrateToDammV2`. When `CpAmm.isPoolExist` is true, **Get quote** / **Sign DAMM swap** in the DAMM v2 card trade the graduated pool.
 
 No wallet nearby: `npm run preview-curves` builds every preset and quotes a buy. `npm run build-config-tx` builds an unsigned `createConfig` transaction aimed at the DBC program. Neither script sends anything.
 
@@ -32,20 +40,50 @@ The same config object is what gets signed on devnet or mainnet. Sandbox thresho
 
 ## Architecture
 
+No backend holds keys or funds. The browser builds each transaction with Meteora's SDKs, the wallet signs, and the RPC confirms. All state lives in Meteora's DBC and DAMM v2 programs.
+
 ```mermaid
 flowchart LR
-  preset["Preset marketplace"] --> build["DBC curve builders"]
-  build --> config["createConfig"]
-  config --> pool["createPool"]
-  pool --> trade["swapQuote2 / swap2"]
-  trade --> gate{"quote reserve >= threshold"}
-  gate -->|no| trade
-  gate -->|yes| migrate["migrateToDammV2"]
-  migrate --> damm["DAMM v2 pool"]
-  damm --> swap["CpAmm getQuote2 / swap2"]
+  subgraph Browser["Browser · Next.js on Vercel"]
+    UI["Presets · Launch · Pool desk"] --> Lib["lib/meteora<br/>presets · curve · actions"]
+  end
+  Lib --> SDK["DBC SDK + cp-amm SDK"]
+  Lib -- "unsigned tx" --> Wallet["Wallet<br/>Phantom · Solflare"]
+  Wallet -- "signed tx" --> RPC["Solana RPC"]
+  RPC --> DBC["DBC program"]
+  RPC --> DAMM["DAMM v2 program"]
+  DBC -- "migrateToDammV2" --> DAMM
 ```
 
-The wallet signs. The RPC confirms. The UI records a step only after that confirmation.
+Lifecycle of one listing:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Issuer
+  participant App as StockCurve
+  participant W as Wallet
+  participant DBC as DBC program
+  participant DAMM as DAMM v2 program
+  Issuer->>App: Pick a book, terms, quote token
+  App->>W: createConfig
+  W->>DBC: config account
+  App->>W: createPool
+  W->>DBC: mint + virtual pool
+  loop until quote reserve ≥ threshold
+    Issuer->>App: buy / sell
+    App->>W: swap2
+    W->>DBC: trade on the curve
+  end
+  App->>W: migrateToDammV2
+  W->>DBC: graduate
+  DBC->>DAMM: pool with 100% locked LP
+  Issuer->>App: trade
+  App->>W: CpAmm swap2
+  W->>DAMM: trade
+```
+
+The UI records a step only after the RPC confirms its signature. Full system diagram, user flow, lifecycle state machine and one sequence diagram per transaction: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Meteora integration map
 
@@ -81,6 +119,8 @@ Docs: [DBC](https://docs.meteora.ag/developer-guides/dbc), [DAMM v2](https://doc
 **Blurb:** StockCurve is a launch desk for tokenized equity. Issuers pick a flat, long, or exponential Meteora DBC book sized for thin markets, trade through price discovery, and graduate into permanently locked DAMM v2 liquidity. Presets are reusable. A paid-preset slot is ready for a real payment rail and stays honest until one exists.
 
 **Demo video:** Show the homepage curve, the locked Prime Book, two devnet signatures, a DBC swap, and the disabled graduation button with the reserve short of the threshold. If the curve is filled, show `migrateToDammV2` confirm and a DAMM v2 quote. Do not cut in a success state that the RPC did not confirm.
+
+**Live app:** https://meteora-dbc-dammv2.vercel.app
 
 **Source access:** If this repository is ever made private, add GitHub user `dannxbt` with Read.
 
@@ -137,7 +177,8 @@ components/                Launch wizard, pool desk, preset browser, lifecycle
 lib/meteora/curve.ts       Preset to DBC config and pre-pool quotes
 lib/meteora/actions.ts     Config, pool, swap, graduation gate, DAMM v2
 lib/marketplace/access.ts  Free presets, locked paid presets, demo unlock
-scripts/preview-curves.ts  Offline SDK checks, including the graduation gate
+scripts/preview-curves.ts  Offline SDK checks, including the graduation gate and curve profile
+docs/ARCHITECTURE.md       Architecture, user flow, lifecycle and sequence diagrams
 ```
 
 TypeScript, Next.js App Router, `@solana/web3.js` 1.x, and the wallet adapter. `next.config.ts` stubs Node builtins so the browser bundle can load the Meteora SDKs.

@@ -2,6 +2,8 @@
 
 Use this with the 60-second walkthrough at the top of the README.
 
+Live app: https://meteora-dbc-dammv2.vercel.app (devnet by default; connect a devnet wallet with faucet SOL).
+
 ## Depth of Meteora integration
 
 - [ ] Curve preview is produced by `buildCurve` / `buildCurveWithLiquidityWeights` / `buildCurveWithTwoSegments` in `lib/meteora/curve.ts`.
