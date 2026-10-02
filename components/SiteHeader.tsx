@@ -18,8 +18,8 @@ export function SiteHeader() {
       <div className="site-header-inner">
         <Link className="brand" href="/">
           <svg className="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
-            <rect width="64" height="64" rx="14" fill="#1c241c" />
-            <path d="M10 46c8-2 10-18 18-20 6-1.5 8 8 14 8 6 0 8-14 12-16" stroke="#c4963a" strokeWidth="4" strokeLinecap="round" fill="none" />
+            <path d="M6 50c9-2 11-20 20-22 7-1.6 9 9 16 9 7 0 9-16 14-18" stroke="#c4963a" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+            <circle cx="56" cy="19" r="5" fill="#4fbf7f" />
           </svg>
           <span>
             <strong>StockCurve</strong>
