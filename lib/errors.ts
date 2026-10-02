@@ -17,7 +17,12 @@ function adviceFor(message: string): string | null {
   if (/not connected|connect a wallet|wallet not/.test(text)) {
     return "Connect Phantom or Solflare with the network selected in the header, then try again.";
   }
-  if (/insufficient|insufficient funds|insufficient lamports|debit an account but found no record|0x1$/.test(text)) {
+  // Checked before low-SOL: the DBC program says "insufficient liquidity" when an exact-in buy is larger
+  // than what is left on the curve before graduation. That is not a balance problem.
+  if (/insufficient ?liquidity|not enough liquidity/.test(text)) {
+    return "This buy is larger than what is left on the curve before graduation. Turn on Partial fill so the curve takes only what it needs and refunds the rest, or buy a smaller amount. Once the reserve reaches the threshold, graduate the pool.";
+  }
+  if (/insufficient funds|insufficient lamports|debit an account but found no record|0x1$/.test(text)) {
     return "The wallet does not have enough SOL for rent and fees. On a SOL-quoted pool it also needs SOL for the swap. On devnet, request SOL from https://faucet.solana.com and leave a little extra for fees.";
   }
   if (/blockhash|block height exceeded|transaction expired|timeout/.test(text)) {

@@ -6,32 +6,64 @@ import { explorerAccount, shortKey } from "@/lib/format";
 import { WalletReadyState, type WalletName } from "@solana/wallet-adapter-base";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 const FAUCET_URL = "https://faucet.solana.com";
 
-/** Header wallet control: connect button, wallet picker, and the connected account menu. */
+/** Shown with an install link when the wallet has not registered itself in this browser. */
+const SUGGESTED_WALLETS = [
+  { name: "Phantom", url: "https://phantom.com/download" },
+  { name: "Solflare", url: "https://solflare.com/download" },
+];
+
+const WalletPickerContext = createContext<{ openPicker: () => void }>({ openPicker: () => undefined });
+
+/** Opens the wallet picker from anywhere on the page, for example a "connect to trade" prompt. */
+export function useWalletPicker() {
+  return useContext(WalletPickerContext);
+}
+
+/**
+ * Owns the wallet picker so it renders in one stable place. Rendering it inside the header button
+ * remounted it when the button switched to its connected layout, and the remounted copy never closed.
+ */
+export function WalletPickerProvider({ children }: { children: ReactNode }) {
+  const { publicKey, connected } = useWallet();
+  const [open, setOpen] = useState(false);
+  const openPicker = useCallback(() => setOpen(true), []);
+  const account = connected ? publicKey?.toBase58() : undefined;
+
+  useEffect(() => {
+    if (account) setOpen(false);
+  }, [account]);
+
+  return (
+    <WalletPickerContext.Provider value={{ openPicker }}>
+      {children}
+      {open && <WalletPicker onClose={() => setOpen(false)} />}
+    </WalletPickerContext.Provider>
+  );
+}
+
+/** Header wallet control: connect button and the connected account menu. */
 export function WalletConnect() {
   const { wallet, publicKey, connected, connecting, disconnect } = useWallet();
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const { openPicker } = useWalletPicker();
   const [menuOpen, setMenuOpen] = useState(false);
 
   if (!connected || !publicKey) {
     return (
-      <>
-        <button className="wallet-trigger" type="button" onClick={() => setPickerOpen(true)} disabled={connecting}>
-          {connecting ? (
-            <>
-              <span className="spinner" aria-hidden="true" />
-              Connecting…
-            </>
-          ) : (
-            "Connect wallet"
-          )}
-        </button>
-        {pickerOpen && <WalletPicker onClose={() => setPickerOpen(false)} />}
-      </>
+      <button className="wallet-trigger" type="button" onClick={openPicker} disabled={connecting}>
+        {connecting ? (
+          <>
+            <span className="spinner" aria-hidden="true" />
+            Connecting…
+          </>
+        ) : (
+          "Connect wallet"
+        )}
+      </button>
     );
   }
 
@@ -55,7 +87,7 @@ export function WalletConnect() {
           onClose={() => setMenuOpen(false)}
           onChange={() => {
             setMenuOpen(false);
-            setPickerOpen(true);
+            openPicker();
           }}
           onDisconnect={() => {
             setMenuOpen(false);
@@ -63,7 +95,6 @@ export function WalletConnect() {
           }}
         />
       )}
-      {pickerOpen && <WalletPicker onClose={() => setPickerOpen(false)} />}
     </div>
   );
 }
@@ -172,7 +203,7 @@ function WalletPicker({ onClose }: { onClose: () => void }) {
   const ready = wallets.filter(
     (item) => item.readyState === WalletReadyState.Installed || item.readyState === WalletReadyState.Loadable,
   );
-  const missing = wallets.filter((item) => item.readyState === WalletReadyState.NotDetected);
+  const missing = SUGGESTED_WALLETS.filter((item) => !ready.some((wallet) => wallet.adapter.name === item.name));
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -252,9 +283,9 @@ function WalletPicker({ onClose }: { onClose: () => void }) {
             );
           })}
           {missing.map((item) => (
-            <a key={item.adapter.name} className="wallet-option muted-option" href={item.adapter.url} target="_blank" rel="noreferrer">
-              <img src={item.adapter.icon} alt="" width={32} height={32} />
-              <span className="wallet-option-name">{item.adapter.name}</span>
+            <a key={item.name} className="wallet-option muted-option" href={item.url} target="_blank" rel="noreferrer">
+              <span className="wallet-option-initial" aria-hidden="true">{item.name[0]}</span>
+              <span className="wallet-option-name">{item.name}</span>
               <span className="pill">Install ↗</span>
             </a>
           ))}

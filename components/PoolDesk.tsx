@@ -2,6 +2,8 @@
 
 import { Lifecycle } from "@/components/Lifecycle";
 import { useNetwork } from "@/components/Providers";
+import { SOL_FEE_RESERVE, useTradeBalances } from "@/components/useTradeBalances";
+import { useWalletPicker } from "@/components/WalletConnect";
 import { explainError } from "@/lib/errors";
 import { explorerAccount, explorerTx, formatRaw, percent, shortKey } from "@/lib/format";
 import {
@@ -41,6 +43,8 @@ export function PoolDesk({ address }: { address: string }) {
   const [dammAmount, setDammAmount] = useState("0.05");
   const [dammRows, setDammRows] = useState<QuoteRows>([]);
   const [busy, setBusy] = useState(false);
+  const { openPicker } = useWalletPicker();
+  const balances = useTradeBalances(snapshot?.quoteMint, snapshot?.baseMint);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -91,15 +95,17 @@ export function PoolDesk({ address }: { address: string }) {
         amountIn: rawFromUi(Number(amount), decimals),
         swapBaseForQuote: side === "sell",
         slippageBps: 100,
-        partialFill,
+        partialFill: partialFillOn,
       });
       const outDecimals = side === "buy" ? snapshot.baseDecimals : snapshot.quoteDecimals;
       const minimum = quoted.quote.minimumAmountOut?.toString() ?? "0";
       setQuoteRows([
         { label: "You receive", value: formatRaw(quoted.quote.outputAmount.toString(), outDecimals) },
         { label: "Minimum (1% slippage)", value: formatRaw(minimum, outDecimals) },
-        { label: "Trading fee", value: formatRaw(quoted.quote.tradingFee.toString(), side === "buy" ? snapshot.quoteDecimals : snapshot.baseDecimals) },
-        { label: "Unfilled input", value: quoted.quote.amountLeft.toString() },
+        { label: "Trading fee", value: formatRaw(quoted.quote.tradingFee.toString(), side === "buy" ? snapshot.quoteDecimals : snapshot.baseDecimals, 9) },
+        ...(quoted.quote.amountLeft.gtn(0)
+          ? [{ label: "Unused, refunded", value: `${formatRaw(quoted.quote.amountLeft.toString(), decimals, 6)} ${side === "buy" ? (snapshot.quoteMint === NATIVE_SOL_MINT ? "SOL" : "USDC") : "tokens"}` }]
+          : []),
       ]);
     } catch (cause) {
       setQuoteRows([]);
@@ -127,7 +133,7 @@ export function PoolDesk({ address }: { address: string }) {
         amountIn,
         swapBaseForQuote: side === "sell",
         slippageBps: 100,
-        partialFill,
+        partialFill: partialFillOn,
       });
       const minimum = quoted.quote.minimumAmountOut ?? new BN(0);
       const transaction = await buildDbcSwapTransaction({
@@ -137,11 +143,11 @@ export function PoolDesk({ address }: { address: string }) {
         amountIn,
         minimumAmountOut: minimum,
         swapBaseForQuote: side === "sell",
-        partialFill,
+        partialFill: partialFillOn,
       });
       const signature = await signAndSend(transaction, []);
       setStatus(`Swap confirmed: ${signature}`);
-      await refresh();
+      await Promise.all([refresh(), balances.refresh()]);
     } catch (cause) {
       setError(explainError(cause));
     } finally {
@@ -160,7 +166,7 @@ export function PoolDesk({ address }: { address: string }) {
       const built = await buildGraduationTransaction({ connection, payer: publicKey, poolAddress: address });
       const signature = await signAndSend(built.transaction, built.signers);
       setStatus(`Graduation confirmed: ${signature}`);
-      await refresh();
+      await Promise.all([refresh(), balances.refresh()]);
     } catch (cause) {
       setError(explainError(cause));
     } finally {
@@ -221,7 +227,7 @@ export function PoolDesk({ address }: { address: string }) {
       });
       const signature = await signAndSend(transaction, []);
       setStatus(`DAMM v2 swap confirmed: ${signature}`);
-      await refresh();
+      await Promise.all([refresh(), balances.refresh()]);
     } catch (cause) {
       setError(explainError(cause));
     } finally {
@@ -242,6 +248,37 @@ export function PoolDesk({ address }: { address: string }) {
   const canGraduate = snapshot ? graduationReason === null && connected && !busy : false;
   const quoteSymbol = snapshot ? (snapshot.quoteMint === NATIVE_SOL_MINT ? "SOL" : "USDC") : "";
   const inputUnit = side === "buy" ? quoteSymbol : "base";
+  const isSolQuote = snapshot?.quoteMint === NATIVE_SOL_MINT;
+  const sideDecimals = side === "buy" ? quoteDecimals : snapshot?.baseDecimals ?? 6;
+  const sideBalance = side === "buy" ? balances.quote : balances.base;
+  // "Max" on a SOL buy keeps SOL back for fees and token-account rent.
+  const maxSpend = sideBalance && side === "buy" && isSolQuote ? BN.max(sideBalance.sub(SOL_FEE_RESERVE), new BN(0)) : sideBalance;
+  const balanceUnit = side === "buy" ? quoteSymbol : "tokens";
+  const overBalance = (value: string) => {
+    if (!sideBalance || !Number.isFinite(Number(value)) || Number(value) <= 0) return false;
+    return rawFromUi(Number(value), sideDecimals).gt(sideBalance);
+  };
+  // A buy larger than what is left before graduation only goes through in partial-fill mode: exact-in
+  // fails with "insufficient liquidity". Switch it on automatically; the unused quote is refunded.
+  const remainingToThreshold = snapshot
+    ? BN.max(new BN(snapshot.migrationThreshold).sub(new BN(snapshot.quoteReserve)), new BN(0))
+    : null;
+  const crossesGraduation =
+    side === "buy" &&
+    remainingToThreshold !== null &&
+    Number.isFinite(Number(amount)) &&
+    Number(amount) > 0 &&
+    rawFromUi(Number(amount), quoteDecimals).gt(remainingToThreshold);
+  const partialFillOn = partialFill || crossesGraduation;
+  const balanceProps = {
+    connected,
+    loading: balances.loading,
+    balance: sideBalance,
+    decimals: sideDecimals,
+    unit: balanceUnit,
+    side,
+    onConnect: openPicker,
+  };
   const statusSignature = status.includes("confirmed: ") ? status.split("confirmed: ")[1] : "";
   const statusLabel = statusSignature ? status.split(":")[0] : status;
   const phaseLabel = !snapshot ? "" : damm?.exists ? "DAMM v2 live" : snapshot.migrated ? "Graduated" : snapshot.complete ? "Ready to graduate" : "On the curve";
@@ -336,20 +373,31 @@ export function PoolDesk({ address }: { address: string }) {
                     <button className={side === "sell" ? "active sell" : ""} type="button" onClick={() => { setSide("sell"); setQuoteRows([]); }} aria-pressed={side === "sell"}>Sell</button>
                   </div>
                   <div className="field">
-                    <label htmlFor="amount">{side === "buy" ? `Spend (${quoteSymbol})` : "Sell (base token)"}</label>
+                    <div className="field-head">
+                      <label htmlFor="amount">{side === "buy" ? `Spend (${quoteSymbol})` : "Sell (base token)"}</label>
+                      <BalanceLine {...balanceProps} onMax={maxSpend ? () => { setAmount(formatRaw(maxSpend.toString(), sideDecimals, sideDecimals)); setQuoteRows([]); } : undefined} />
+                    </div>
                     <div className="input-affix">
                       <input id="amount" inputMode="decimal" value={amount} onChange={(event) => { setAmount(event.target.value); setQuoteRows([]); }} />
                       <span>{inputUnit}</span>
                     </div>
+                    {connected && overBalance(amount) && <p className="fine field-error">More than your balance.</p>}
                   </div>
                   <label className="check">
-                    <input type="checkbox" checked={partialFill} onChange={(event) => setPartialFill(event.target.checked)} />
-                    <span>Partial fill <span className="fine">for the last buy that would cross graduation</span></span>
+                    <input type="checkbox" checked={partialFillOn} disabled={crossesGraduation} onChange={(event) => setPartialFill(event.target.checked)} />
+                    <span>
+                      Partial fill{" "}
+                      <span className="fine">
+                        {crossesGraduation && remainingToThreshold
+                          ? `on: only ${formatRaw(remainingToThreshold.toString(), quoteDecimals, 6)} ${quoteSymbol} is left before graduation, the rest is refunded`
+                          : "for the last buy that would cross graduation"}
+                      </span>
+                    </span>
                   </label>
                   {quoteRows.length > 0 && <QuoteTable rows={quoteRows} />}
                   <div className="actions">
                     <button className="button-secondary" type="button" onClick={() => void onQuote()}>Get quote</button>
-                    <button className={`button ${side === "sell" ? "danger" : "moss"}`} type="button" onClick={() => void onSwap()} disabled={busy || !connected} title={connected ? "Signs swap2" : "Connect a wallet first"}>
+                    <button className={`button ${side === "sell" ? "danger" : "moss"}`} type="button" onClick={() => (connected ? void onSwap() : openPicker())} disabled={busy || (connected && overBalance(amount))} title={connected ? "Signs swap2" : "Connect a wallet first"}>
                       {busy && <span className="spinner" aria-hidden="true" />}
                       {connected ? (side === "buy" ? "Sign buy" : "Sign sell") : "Connect wallet to trade"}
                     </button>
@@ -381,18 +429,22 @@ export function PoolDesk({ address }: { address: string }) {
                       <button className={side === "sell" ? "active sell" : ""} type="button" onClick={() => { setSide("sell"); setDammRows([]); }}>Sell</button>
                     </div>
                     <div className="field">
-                      <label htmlFor="damm-amount">{side === "buy" ? `Spend (${quoteSymbol})` : "Sell (base token)"}</label>
+                      <div className="field-head">
+                        <label htmlFor="damm-amount">{side === "buy" ? `Spend (${quoteSymbol})` : "Sell (base token)"}</label>
+                        <BalanceLine {...balanceProps} onMax={maxSpend ? () => { setDammAmount(formatRaw(maxSpend.toString(), sideDecimals, sideDecimals)); setDammRows([]); } : undefined} />
+                      </div>
                       <div className="input-affix">
                         <input id="damm-amount" inputMode="decimal" value={dammAmount} onChange={(event) => { setDammAmount(event.target.value); setDammRows([]); }} />
                         <span>{inputUnit}</span>
                       </div>
+                      {connected && overBalance(dammAmount) && <p className="fine field-error">More than your balance.</p>}
                     </div>
                     {dammRows.length > 0 && <QuoteTable rows={dammRows} />}
                     <div className="actions">
                       <button className="button-secondary" type="button" onClick={() => void onDammQuote()}>Get quote</button>
-                      <button className="button" type="button" onClick={() => void onDammSwap()} disabled={busy || !connected}>
+                      <button className="button" type="button" onClick={() => (connected ? void onDammSwap() : openPicker())} disabled={busy || (connected && overBalance(dammAmount))}>
                         {busy && <span className="spinner" aria-hidden="true" />}
-                        Sign DAMM swap
+                        {connected ? "Sign DAMM swap" : "Connect wallet to trade"}
                       </button>
                     </div>
                     <p className="fine">Uses <code>CpAmm.getQuote2</code> and <code>CpAmm.swap2</code>. Liquidity <span className="mono">{damm.liquidity}</span>.</p>
@@ -422,6 +474,45 @@ export function PoolDesk({ address }: { address: string }) {
         </>
       )}
     </div>
+  );
+}
+
+function BalanceLine({
+  connected,
+  loading,
+  balance,
+  decimals,
+  unit,
+  side,
+  onConnect,
+  onMax,
+}: {
+  connected: boolean;
+  loading: boolean;
+  balance: BN | null;
+  decimals: number;
+  unit: string;
+  side: "buy" | "sell";
+  onConnect: () => void;
+  onMax?: () => void;
+}) {
+  if (!connected) {
+    return (
+      <button className="balance-line link" type="button" onClick={onConnect}>
+        Connect wallet to see your {side === "buy" ? unit : "token"} balance
+      </button>
+    );
+  }
+  if (!balance) return <span className="balance-line">{loading ? "Reading balance…" : "Balance unavailable"}</span>;
+  return (
+    <span className="balance-line">
+      Balance <strong className="mono">{formatRaw(balance.toString(), decimals)}</strong> {unit}
+      {onMax && balance.gtn(0) && (
+        <button className="max-button" type="button" onClick={onMax} title={side === "buy" && unit === "SOL" ? "Keeps 0.01 SOL for fees and rent" : undefined}>
+          Max
+        </button>
+      )}
+    </span>
   );
 }
 
