@@ -18,14 +18,14 @@ export function formatPrice(value: number): string {
   if (!Number.isFinite(value)) return "—";
   if (value === 0) return "0";
   const abs = Math.abs(value);
-  if (abs >= 1000) return value.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  if (abs >= 1) return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  if (abs >= 1000) return value.toLocaleString("en-US", { maximumFractionDigits: 2 });
+  if (abs >= 1) return value.toLocaleString("en-US", { maximumFractionDigits: 4 });
   return value.toExponential(3);
 }
 
 export function formatCompact(value: number): string {
   if (!Number.isFinite(value)) return "—";
-  return value.toLocaleString(undefined, { maximumFractionDigits: value >= 100 ? 0 : 4 });
+  return value.toLocaleString("en-US", { maximumFractionDigits: value >= 100 ? 0 : 4 });
 }
 
 export function explorerAccount(address: string, network: string): string {
@@ -41,4 +41,11 @@ export function explorerTx(signature: string, network: string): string {
 export function percent(value: number): string {
   if (!Number.isFinite(value)) return "—";
   return `${(value * 100).toFixed(2)}%`;
+}
+
+/** Whole-token amount from raw base units, grouped with a fixed locale so server and browser render the same text. */
+export function formatTokens(raw: string, decimals: number): string {
+  const value = Number(raw) / 10 ** decimals;
+  if (!Number.isFinite(value)) return "—";
+  return value.toLocaleString("en-US", { maximumFractionDigits: value >= 1000 ? 0 : 2 });
 }
