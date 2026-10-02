@@ -821,17 +821,22 @@ p { margin: 0 0 12px; }
   .summary { display: none; }
   .desk { grid-template-columns: 1fr; }
 }
-@media (max-width: 720px) {
+/* Below 980px the one-row header (brand, nav, network, wallet) no longer fits: wrap the nav and network onto a second row. */
+@media (max-width: 980px) {
   .site-header-inner { flex-wrap: wrap; height: auto; padding: 10px 0; gap: 8px 10px; }
   .brand > span > span { display: none; }
   .header-tools { display: contents; }
-  .wallet-trigger, .wallet-account { order: 2; margin-left: auto; }
+  .wallet-trigger, .wallet-account { order: 1; margin-left: auto; }
+  .site-header-inner::before { content: ""; order: 2; flex-basis: 100%; height: 0; }
+  .wizard-side { top: 126px; }
   .nav { order: 3; flex: 1; gap: 2px; margin-left: -10px; }
   .nav a { padding: 7px 10px; font-size: 14.5px; }
   .network-toggle { order: 4; }
   .network-toggle button { padding: 5px 10px; font-size: 12.5px; }
   .network-toggle .label-full { display: none; }
   .network-toggle .label-short { display: inline; }
+}
+@media (max-width: 720px) {
   .wallet-trigger { padding: 8px 14px; font-size: 13.5px; }
   .wallet-balance { display: none; }
   .card-grid, .steps, .shape-guide, .form-grid, .preset-pick, .option-cards, .program-strip { grid-template-columns: 1fr; }
